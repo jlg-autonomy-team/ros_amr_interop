@@ -49,7 +49,7 @@ from vda5050_connector_py.utils import read_str_parameter, read_int_parameter
 from vda5050_connector_py.utils import convert_ros_message_to_json
 from vda5050_connector_py.utils import get_vda5050_ts
 
-from vda5050_connector_py.vda5050_controller import DEFAULT_PROTOCOL_VERSION
+from vda5050_connector_py.vda5050_controller import DEFAULT_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS
 
 # ROS msgs / srvs / actions
 from vda5050_msgs.msg import Action as VDAAction
@@ -194,6 +194,32 @@ def generate_vda_instant_action_msg(instant_action):
     return vda_instant_action
 
 
+def generate_vda5050_topic_alias(vda_version):
+    """
+    Create an alias for the current vda5050 version. The aliases are needed to
+    create the mqtt topics.
+
+    Args:
+    ----
+        vda_version (string): VDA5050 version with format x.x.x.
+
+    Raises:
+    ------
+        ValueError if the alias is not within the supported values.
+
+    Returns
+    -------
+        The alias of the version. For example, for the version '2.0.0', the alias is
+        'v2'
+    """
+    if vda_version in SUPPORTED_PROTOCOL_VERSIONS:
+        return f"v{vda_version[0]}"
+    else:
+        raise ValueError(
+            f"Invalid protocol major version. Supported versions are: {SUPPORTED_PROTOCOL_VERSIONS},"
+            f"but got {vda_version}"
+        )
+
 class MQTTBridge(Node):
     """Translates VDA5050 MQTT messages from and to ROS2."""
 
@@ -208,6 +234,9 @@ class MQTTBridge(Node):
         mqtt_port = read_int_parameter(self, "mqtt_port", 1883)
         mqtt_username = read_str_parameter(self, "mqtt_username", "")
         mqtt_password = read_str_parameter(self, "mqtt_password", "")
+
+        self.vda5050_version = read_str_parameter(self, "vda5050_protocol_version", "2.0.0")
+        self.vda5050_version_alias = generate_vda5050_topic_alias(self.vda5050_version)
 
         self._manufacturer_name = read_str_parameter(
             self, "manufacturer_name", "robots"
@@ -238,6 +267,7 @@ class MQTTBridge(Node):
             manufacturer=self._manufacturer_name,
             serial_number=self._serial_number,
             topic="connection",
+            major_version=self.vda5050_version_alias,
         )
 
         # NOTE: will payload cannot be set dynamically or updated
@@ -247,7 +277,7 @@ class MQTTBridge(Node):
         will_payload = convert_ros_message_to_json(
             VDAConnection(
                 header_id=0,
-                version=DEFAULT_PROTOCOL_VERSION,
+                version=self.vda5050_version,
                 timestamp="1970-01-01T12:00:00.00Z",
                 manufacturer=self._manufacturer_name,
                 serial_number=self._serial_number,
@@ -278,6 +308,7 @@ class MQTTBridge(Node):
                     manufacturer=self._manufacturer_name,
                     serial_number=self._serial_number,
                     topic="order",
+                    major_version=self.vda5050_version_alias,
                 )
             )
             self.mqtt_client.subscribe(
@@ -285,12 +316,13 @@ class MQTTBridge(Node):
                     manufacturer=self._manufacturer_name,
                     serial_number=self._serial_number,
                     topic="instantActions",
+                    major_version=self.vda5050_version_alias
                 )
             )
             self._publish_connection(
                 msg=VDAConnection(
                     header_id=0,
-                    version=DEFAULT_PROTOCOL_VERSION,
+                    version=self.vda5050_version,
                     timestamp=get_vda5050_ts(),
                     manufacturer=self._manufacturer_name,
                     serial_number=self._serial_number,
@@ -405,7 +437,7 @@ class MQTTBridge(Node):
 
         offline_message = VDAConnection(
             header_id=0,
-            version=DEFAULT_PROTOCOL_VERSION,
+            version=self.vda5050_version,
             timestamp=get_vda5050_ts(),
             manufacturer=self._manufacturer_name,
             serial_number=self._serial_number,
@@ -424,6 +456,7 @@ class MQTTBridge(Node):
                 manufacturer=self._manufacturer_name,
                 serial_number=self._serial_number,
                 topic="order",
+                major_version=self.vda5050_version_alias
             )
         )
         self.mqtt_client.unsubscribe(
@@ -431,6 +464,7 @@ class MQTTBridge(Node):
                 manufacturer=self._manufacturer_name,
                 serial_number=self._serial_number,
                 topic="instantActions",
+                major_version=self.vda5050_version_alias
             )
         )
 
@@ -463,6 +497,7 @@ class MQTTBridge(Node):
             manufacturer=self._manufacturer_name,
             serial_number=self._serial_number,
             topic="state",
+            major_version=self.vda5050_version_alias
         )
         self._publish_to_topic(msg, topic)
 
@@ -485,6 +520,7 @@ class MQTTBridge(Node):
             manufacturer=self._manufacturer_name,
             serial_number=self._serial_number,
             topic="connection",
+            major_version=self.vda5050_version_alias
         )
         self._publish_to_topic(msg, topic)
 
@@ -501,5 +537,6 @@ class MQTTBridge(Node):
             manufacturer=self._manufacturer_name,
             serial_number=self._serial_number,
             topic="visualization",
+            major_version=self.vda5050_version_alias
         )
         self._publish_to_topic(msg, topic)

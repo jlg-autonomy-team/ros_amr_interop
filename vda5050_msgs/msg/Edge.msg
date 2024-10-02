@@ -30,6 +30,11 @@ float64 orientation                 # [rad] Orientation of the AGV on the edge r
                                     # If a trajectory without orientation and the orientation field here is defined,
                                     # apply the orientation to the tangent of the trajectory.
 
+string orientation_type             # Enum {GLOBAL, TANGENTIAL}: 
+                                    # "GLOBAL"- relative to the global project specific map coordinate system; 
+                                    # "TANGENTIAL"- tangential to the edge.
+                                    # If not defined, the default value is "TANGENTIAL"
+
 string direction                    # Sets direction at junctions for line-guided vehicles, to be defined initially
                                     # (vehicle individual) Example: left, right, straight, 433MHz
 

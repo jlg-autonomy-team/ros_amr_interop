@@ -110,7 +110,9 @@ def read_str_array_parameter(node: Node, param_name: str, alternative: list) -> 
         value=alternative,
     )
     param = node.get_parameter(param_name)
-    return param if type(param) == list else param.get_parameter_value().string_array_value
+    return (
+        param if type(param) == list else param.get_parameter_value().string_array_value
+    )
 
 
 def json_camel_to_snake_case(s):
@@ -126,6 +128,7 @@ def json_camel_to_snake_case(s):
         s (str|bytes): JSON message as string or bytes
 
     """
+
     def snake_case_dict(obj):
         """
         Replace dict camelCase keys by its snake case equivalent.
@@ -162,6 +165,7 @@ def json_snake_to_camel_case(s):
         s (str|bytes): JSON message as string or bytes
 
     """
+
     def to_camel_case(snake_str):
         """
         Convert snake case string to camel case.
@@ -221,7 +225,11 @@ def convert_ros_message_to_json(msg):
 
 
 def get_vda5050_mqtt_topic(
-    manufacturer, serial_number, topic, major_version, interface_name="uagv",
+    manufacturer,
+    serial_number,
+    topic,
+    major_version,
+    interface_name="uagv",
 ):
     """
     Return suggested VDA5050 MQTT topics.
@@ -275,7 +283,7 @@ def get_vda5050_mqtt_topic(
 
 
 def get_vda5050_ros2_topic(
-    manufacturer, serial_number, topic, interface_name="uagv", major_version="v1"
+    manufacturer, serial_number, topic, interface_name="uagv", major_version="v2"
 ):
     """
     Return ROS2 topics used for communication between controller and adapter.
@@ -306,7 +314,6 @@ def get_vda5050_ros2_topic(
 
     """
     mqtt_topic = get_vda5050_mqtt_topic(
-        manufacturer, serial_number, topic, major_version, interface_name)
-    return (
-        f"/{mqtt_topic}"
+        manufacturer, serial_number, topic, major_version, interface_name
     )
+    return f"/{mqtt_topic}"

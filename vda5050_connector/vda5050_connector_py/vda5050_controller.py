@@ -1194,10 +1194,8 @@ class VDA5050Controller(Node):
                 "order_id": order.order_id,
                 "order_update_id": order.order_update_id,
                 "errors": errors,
-                "node_states": (mode == OrderAcceptModes.STITCH) * self._current_state.node_states
-                + self._get_node_states(order),
-                "edge_states": (mode == OrderAcceptModes.STITCH) * self._current_state.edge_states
-                + self._get_edge_states(order),
+                "node_states": self._current_state.node_states + self._get_node_states(order),
+                "edge_states": self._current_state.edge_states + self._get_edge_states(order),
                 "action_states": self._current_state.action_states[:-len(order.nodes[0].actions)]
                 + self._get_action_states(order),
                 "new_base_request": False,

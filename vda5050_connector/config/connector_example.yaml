@@ -1,21 +1,20 @@
 mqtt_bridge:
   ros__parameters:
-    mqtt_address: "172.16.115.101" # "localhost"
+    mqtt_address: "localhost"
     mqtt_port: 1883
     mqtt_username: ""
     mqtt_password: ""
-    vda5050_protocol_version: "2.0.0"
-    manufacturer_name: "Navitec"
-    serial_number: "machine002"
+    manufacturer_name: "robots"
+    serial_number: "robot_1"
 
 controller:
   ros__parameters:
-    robot_name: "machine002Name"
-    manufacturer_name: "Navitec"
-    serial_number: "machine002"
+    robot_name: "robot_1"
+    manufacturer_name: "robots"
+    serial_number: "robot_1"
 
 adapter:
   ros__parameters:
-    robot_name: "machine002Name"
-    manufacturer_name: "Navitec"
-    serial_number: "machine002"
+    robot_name: "robot_1"
+    manufacturer_name: "robots"
+    serial_number: "robot_1"

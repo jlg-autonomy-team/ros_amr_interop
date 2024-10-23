@@ -148,6 +148,9 @@ class VDA5050Controller(Node):
         """Configure resources needed by this node."""
         self._read_parameters()
 
+        self._active_pause = False
+        self._retry_current_goal = False
+
         self._cancel_action = None
         self._current_node_actions = []
         self._current_node_goal = None
@@ -666,7 +669,8 @@ class VDA5050Controller(Node):
                 "distance_since_last_node": order_state.state.distance_since_last_node,
                 "battery_state": order_state.state.battery_state,
                 "errors": current_errors + order_state.state.errors,
-                "informations": order_state.state.informations
+                "information": order_state.state.information,
+                "safety_state": order_state.state.safety_state,
             }
         )
 
@@ -835,6 +839,15 @@ class VDA5050Controller(Node):
         current_action: VDACurrentAction = action_result.result
         self._process_vda_action_goal_handle_dict.pop(current_action.action_id)
         self._update_action_status(current_action.action_id, current_action.action_status)
+
+        if (
+            current_action.action_type == "startPause"
+            and current_action.action_status == VDACurrentAction.FINISHED
+        ):
+            self._set_active_pause(True)
+        elif current_action.action_status == VDACurrentAction.FINISHED:
+            self._set_active_pause(False)
+
         self.logger.info(f"VDA Action finished. Result: {current_action}")
 
     # Order
@@ -1021,7 +1034,11 @@ class VDA5050Controller(Node):
             True if last <> first base nodes match, False otherwise.
 
         """
-        last_node = self._current_order.nodes[-1]
+        # get last node of the base order
+        last_node = next(
+            (node for node in reversed(self._current_order.nodes) if node.released),
+            None,
+        )
         stitch_node = order.nodes[0]
 
         # Return False if node actions differ
@@ -1175,9 +1192,9 @@ class VDA5050Controller(Node):
                 "order_id": order.order_id,
                 "order_update_id": order.order_update_id,
                 "errors": errors,
-                "node_states": (mode == OrderAcceptModes.STITCH) * self._current_state.node_states
+                "node_states": self._current_state.node_states
                 + self._get_node_states(order),
-                "edge_states": (mode == OrderAcceptModes.STITCH) * self._current_state.edge_states
+                "edge_states": self._current_state.edge_states
                 + self._get_edge_states(order),
                 "action_states": self._current_state.action_states[:-len(order.nodes[0].actions)]
                 + self._get_action_states(order),
@@ -1335,6 +1352,9 @@ class VDA5050Controller(Node):
         if not self._has_current_order():
             return
 
+        if self._has_active_pause():
+            return
+
         if len(self._current_node_actions) > 0:
             self._execute_node_actions()
             return
@@ -1444,9 +1464,10 @@ class VDA5050Controller(Node):
             for node in self._current_order.nodes
             if node.sequence_id == self._current_state.last_node_sequence_id + 2
         )
-        if next_node != self._current_node_goal:
+        if next_node != self._current_node_goal or self._retry_current_node():
             self.logger.info(f"Processing node: {next_node}")
 
+            self._set_retry_current_node(False)
             self.send_adapter_navigate_to_node(edge=next_edge, node=next_node)
         else:
             self.logger.error(f"{next_node} Already current goal")
@@ -1517,6 +1538,11 @@ class VDA5050Controller(Node):
 
         # When the order is cancelled, this callback should avoid continuing its logic
         if self._canceling_order():
+            return
+
+        if self._has_active_pause():
+            # if there is a pause, retry the current node after pause is stopped
+            self._set_retry_current_node(True)
             return
 
         last_edge = next(
@@ -1938,3 +1964,49 @@ class VDA5050Controller(Node):
         """Populate the localization parameter msg for the factsheet msg."""
         # TODO: This seems to be not defined in the VDA5050 schema.
         return 0
+
+    # Processing Helpers
+
+    def _set_active_pause(self, active: bool):
+        """
+        Set the active pause state.
+
+        Args:
+        ----
+            active (bool): True to set active pause, False to unset it.
+
+        """
+        self._active_pause = active
+
+    def _has_active_pause(self) -> bool:
+        """
+        Check if there is an active pause.
+
+        Returns
+        -------
+            True if there is an active pause, False otherwise.
+
+        """
+        return self._active_pause
+
+    def _set_retry_current_node(self, retry: bool):
+        """
+        Set the retry current node state.
+
+        Args:
+        ----
+            retry (bool): True to set retry current node, False to unset it.
+
+        """
+        self._retry_current_goal = retry
+
+    def _retry_current_node(self) -> bool:
+        """
+        Check if there is a retry current node.
+
+        Returns
+        -------
+            True if there is a retry current node, False otherwise.
+
+        """
+        return self._retry_current_goal

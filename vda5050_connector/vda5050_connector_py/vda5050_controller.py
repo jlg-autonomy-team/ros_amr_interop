@@ -670,7 +670,7 @@ class VDA5050Controller(Node):
                 "battery_state": order_state.state.battery_state,
                 "errors": current_errors + order_state.state.errors,
                 "information": order_state.state.information,
-                "safety_state": order_state.state.safety_state
+                "safety_state": order_state.state.safety_state,
             }
         )
 
@@ -844,7 +844,6 @@ class VDA5050Controller(Node):
             current_action.action_type == "startPause"
             and current_action.action_status == VDACurrentAction.FINISHED
         ):
-            self.logger.info(f"KRT ------- Active pause")
             self._set_active_pause(True)
         elif current_action.action_status == VDACurrentAction.FINISHED:
             self._set_active_pause(False)
@@ -1036,7 +1035,10 @@ class VDA5050Controller(Node):
 
         """
         # get last node of the base order
-        last_node = next((node for node in reversed(self._current_order.nodes) if node.released), None)
+        last_node = next(
+            (node for node in reversed(self._current_order.nodes) if node.released),
+            None,
+        )
         stitch_node = order.nodes[0]
 
         # Return False if node actions differ
@@ -1101,14 +1103,10 @@ class VDA5050Controller(Node):
             and last_node_position.y == stitch_node_position.y
             and last_node_position.y == stitch_node_position.y
             and last_node_position.theta == stitch_node_position.theta
-            and (
-                last_node_position.allowed_deviation_x_y
-                == stitch_node_position.allowed_deviation_x_y
-            )
-            and (
-                last_node_position.allowed_deviation_theta
-                == stitch_node_position.allowed_deviation_theta
-            )
+            and (last_node_position.allowed_deviation_x_y ==
+                 stitch_node_position.allowed_deviation_x_y)
+            and (last_node_position.allowed_deviation_theta ==
+                 stitch_node_position.allowed_deviation_theta)
             and last_node_position.map_id == stitch_node_position.map_id
             and last_node_position.map_description == stitch_node_position.map_description
         )
@@ -1194,8 +1192,10 @@ class VDA5050Controller(Node):
                 "order_id": order.order_id,
                 "order_update_id": order.order_update_id,
                 "errors": errors,
-                "node_states": self._current_state.node_states + self._get_node_states(order),
-                "edge_states": self._current_state.edge_states + self._get_edge_states(order),
+                "node_states": self._current_state.node_states
+                + self._get_node_states(order),
+                "edge_states": self._current_state.edge_states
+                + self._get_edge_states(order),
                 "action_states": self._current_state.action_states[:-len(order.nodes[0].actions)]
                 + self._get_action_states(order),
                 "new_base_request": False,
@@ -1988,7 +1988,7 @@ class VDA5050Controller(Node):
 
         """
         return self._active_pause
-    
+
     def _set_retry_current_node(self, retry: bool):
         """
         Set the retry current node state.

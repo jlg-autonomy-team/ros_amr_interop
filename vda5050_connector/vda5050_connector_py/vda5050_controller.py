@@ -150,6 +150,7 @@ class VDA5050Controller(Node):
 
         self._active_pause = False
         self._retry_current_goal = False
+        self._navigation_error = False
 
         self._cancel_action = None
         self._current_node_actions = []
@@ -1323,6 +1324,50 @@ class VDA5050Controller(Node):
 
         self.logger.info("Finished executing cancelOrder.")
 
+    def _kill_order(self):
+        """
+        Kill order based on processing failures.
+
+        This action will stop running NavigateToNode goals and ProcessVDAAction goals,
+        delete edge_states and node_states, and set to failed waiting action_states.
+        """
+
+        # Set cancelOrder action state to running
+        #self._update_action_status(self._cancel_action.action_id, VDACurrentAction.RUNNING)
+
+        # Set waiting actions to failed
+        for action_state in self._current_state.action_states:
+            if action_state.action_status == VDACurrentAction.WAITING:
+                self._update_action_status(action_state.action_id, VDACurrentAction.FAILED)
+
+        # Interrupt any running action
+        vda_action_goal_handles = self._process_vda_action_goal_handle_dict.values()
+        if len(vda_action_goal_handles) > 0:
+            for goal_handle in vda_action_goal_handles:
+                goal_handle.cancel_goal_async()
+            return
+
+        # Interrupt any running navigation goal
+        if self._is_navigation_active():
+            self._navigate_to_node_goal_handle.cancel_goal_async()
+            return
+
+        # Clear Navigation error after cancelling all actions and goals``
+        if self._has_navigation_error():
+            self._set_navigation_error(False)
+
+        # Once all the VDA actions and navigation goal requests have finished,
+        # the cancel order will be mark as finished
+
+        # Delete remaining node / edge states
+        self._update_state({"new_base_request": False, "node_states": [], "edge_states": []})
+        #self._update_action_status(self._cancel_action.action_id, VDACurrentAction.FINISHED)
+        self._current_order = VDAOrder(order_id="-1")
+        self._cancel_action = None
+        self._current_node_actions = []
+
+        self.logger.info("Finished executing killOrder.")
+
     def _canceling_order(self) -> bool:
         """
         Indicate if there is a request to cancel an order.
@@ -1347,6 +1392,10 @@ class VDA5050Controller(Node):
         """
         if self._canceling_order():
             self._cancel_order()
+            return
+
+        if self._has_navigation_error():
+            self._kill_order()
             return
 
         if not self._has_current_order():
@@ -1533,9 +1582,16 @@ class VDA5050Controller(Node):
             future (Future): Action result future.
 
         """
-        # TODO: Check when the goal fails
+
         self._navigate_to_node_goal_handle = None
 
+        # check result
+        result = future.result().result
+        if result.error:
+            self.logger.error(f'Action error: {result.error_code}')
+            self._set_navigation_error(True)
+            return
+        
         # When the order is cancelled, this callback should avoid continuing its logic
         if self._canceling_order():
             return
@@ -2010,3 +2066,25 @@ class VDA5050Controller(Node):
 
         """
         return self._retry_current_goal
+
+    def _set_navigation_error(self, error: bool):
+        """
+        Set the navigation error state.
+
+        Args:
+        ----
+            error (bool): True to set navigation error, False to unset it.
+
+        """
+        self._navigation_error = error
+
+    def _has_navigation_error(self) -> bool:
+        """
+        Check if there is a navigation error.
+
+        Returns
+        -------
+            True if there is a navigation error, False otherwise.
+
+        """
+        return self._navigation_error

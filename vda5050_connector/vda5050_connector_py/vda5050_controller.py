@@ -701,6 +701,13 @@ class VDA5050Controller(Node):
         self.logger.info(f"Received instant_actions msg with id: '{header_id}'")
 
         for action in instant_actions.actions:
+            # Check if the action is a duplicate
+            if self._is_duplicate_action(action.action_id):
+                self.logger.info(
+                    f"Action '{action.action_id}' is a duplicate, skipping.'"
+                )
+                continue
+
             self.logger.info(
                 f"Processing action '{action.action_id}' of type '{action.action_type}'"
             )
@@ -2088,3 +2095,22 @@ class VDA5050Controller(Node):
 
         """
         return self._navigation_error
+
+    def _is_duplicate_action(self, action_id: str) -> bool:
+        """
+        Checks to see if the action ID is already used in the current state.
+        This helps detect duplicate actions.
+
+        Args:
+        ----
+            action_id (str): Action ID.
+
+        Returns
+        -------
+            True if the action is duplicated, False otherwise`
+
+        """
+        return any(
+            action.action_id == action_id
+            for action in self._current_state.action_states
+        )

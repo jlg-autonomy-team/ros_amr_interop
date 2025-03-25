@@ -1,0 +1,2 @@
+int8 operatingMode
+int8 scissor_height

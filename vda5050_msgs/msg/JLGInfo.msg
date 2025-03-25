@@ -1,2 +1,8 @@
-int8 operating_mode
-int8 scissor_height
+uint8 amr_type
+uint8 operating_mode
+uint8 scissor_height
+uint8 paired_status
+uint32 paired_amr
+uint8 cart_present
+uint32[] acu_dtcs
+uint32[] gm_dtcs

@@ -38,6 +38,7 @@ set(msg_files
     "msg/InfoReference.msg"
     "msg/Header.msg"
     "msg/InstantActions.msg"
+    "msg/JLGInfo.msg"
     "msg/Load.msg"
     "msg/LoadDimensions.msg"
     "msg/LoadSet.msg"

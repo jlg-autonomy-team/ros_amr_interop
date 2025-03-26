@@ -100,7 +100,7 @@ public:
    * @brief Add a new information msg into the information array of the order state
    * Only one thread/writer can modify the order_state.
    */
-  void add_information(const vda5050_msgs::msg::Info & info)
+  void add_information(const vda5050_msgs::msg::JLGInfo & info)
   {
     std::unique_lock lock(mutex);
     order_state_.information.push_back(info);

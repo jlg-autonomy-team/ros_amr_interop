@@ -1542,7 +1542,7 @@ class VDA5050Controller(Node):
         """
         # Create goal message with edge and node parameters
         goal_msg = NavigateToNode.Goal()
-        goal_msg.final = len(self._current_state.node_states) == 0
+        goal_msg.final = len(self._current_state.node_states) <= 1
         goal_msg.edge = edge
         goal_msg.node = node
 

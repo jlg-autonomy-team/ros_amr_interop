@@ -1,4 +1,5 @@
 # Goal
+bool final
 vda5050_msgs/Edge edge
 vda5050_msgs/Node node
 ---

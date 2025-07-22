@@ -1540,7 +1540,6 @@ class VDA5050Controller(Node):
             if node.sequence_id == self._current_state.last_node_sequence_id + 2
         )
 
-        self.logger.info(f"PNE: Redo navigation? '{self._retry_current_node()}'")
         if next_node != self._current_node_goal or self._retry_current_node():
             self.logger.info(f"Processing node: {next_node}")
 

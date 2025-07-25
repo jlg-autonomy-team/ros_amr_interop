@@ -149,6 +149,7 @@ class VDA5050Controller(Node):
         self._read_parameters()
 
         self._active_pause = False
+        self._active_block = False
         self._retry_current_goal = False
         self._navigation_error = False
 
@@ -724,6 +725,13 @@ class VDA5050Controller(Node):
                 {"action_states": self._current_state.action_states + [action_state]}
             )
 
+            if action.blocking_type is not VDAAction.NONE:
+                # do not allow driving
+                self._set_active_block(True)
+
+                # if already driving or retry required, retry when action completes
+                self._set_retry_current_node(self._retry_current_node() or self._is_navigation_active())
+
             if action.action_type == "cancelOrder":
                 self._cancel_action = action
                 continue
@@ -849,13 +857,18 @@ class VDA5050Controller(Node):
         self._process_vda_action_goal_handle_dict.pop(current_action.action_id)
         self._update_action_status(current_action.action_id, current_action.action_status)
 
+        pause_actions = {
+            "startPause": True,
+            "stopPause": False
+        }
+
         if (
-            current_action.action_type == "startPause"
+            current_action.action_type in pause_actions
             and current_action.action_status == VDACurrentAction.FINISHED
         ):
-            self._set_active_pause(True)
-        elif current_action.action_status == VDACurrentAction.FINISHED:
-            self._set_active_pause(False)
+            self._set_active_pause(pause_actions[current_action.action_type])
+
+        self._set_active_block(False)
 
         self.logger.info(f"VDA Action finished. Result: {current_action}")
 
@@ -1410,6 +1423,11 @@ class VDA5050Controller(Node):
             return
 
         if self._has_active_pause():
+            self.logger.info("active_order: has pause")
+            return
+
+        if self._has_active_block():
+            self.logger.info("active_order: has block")
             return
 
         if len(self._current_node_actions) > 0:
@@ -1521,6 +1539,7 @@ class VDA5050Controller(Node):
             for node in self._current_order.nodes
             if node.sequence_id == self._current_state.last_node_sequence_id + 2
         )
+
         if next_node != self._current_node_goal or self._retry_current_node():
             self.logger.info(f"Processing node: {next_node}")
 
@@ -1606,8 +1625,15 @@ class VDA5050Controller(Node):
             return
 
         if self._has_active_pause():
-            # if there is a pause, retry the current node after pause is stopped
+            # Retry _SHOULD_ always be set if a startPause action is received
+            # but this will handle the case if the action has a blocking type of NONE
             self._set_retry_current_node(True)
+            return
+
+        if self._has_active_block() or self._retry_current_node():
+            # I would have liked to set retry here but for quick finishing actions
+            # the active block is released before this callback has time to run
+            # so retry is set on the action receive
             return
 
         last_edge = next(
@@ -2032,16 +2058,19 @@ class VDA5050Controller(Node):
 
     # Processing Helpers
 
-    def _set_active_pause(self, active: bool):
+    def _set_active_pause(self, pause: bool):
         """
         Set the active pause state.
 
+        True when a startPause action is successful.
+        False when a stopPause action is successful.
+
         Args:
         ----
-            active (bool): True to set active pause, False to unset it.
+            pause (bool): True to set pause, False to unset it.
 
         """
-        self._active_pause = active
+        self._active_pause = pause
 
     def _has_active_pause(self) -> bool:
         """
@@ -2053,6 +2082,30 @@ class VDA5050Controller(Node):
 
         """
         return self._active_pause
+
+    def _set_active_block(self, block: bool):
+        """
+        Set the active block state.
+
+        True when an active action has a blocking type other than NONE
+
+        Args:
+        ----
+            block (bool): True to set block, False to unset it.
+
+        """
+        self._active_block = block
+
+    def _has_active_block(self) -> bool:
+        """
+        Check if there is an active block.
+
+        Returns
+        -------
+            True if there is an active block, False otherwise.
+
+        """
+        return self._active_block
 
     def _set_retry_current_node(self, retry: bool):
         """

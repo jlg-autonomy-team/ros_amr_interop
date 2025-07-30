@@ -1587,9 +1587,10 @@ class VDA5050Controller(Node):
         """
         self._navigate_to_node_goal_handle = future.result()
         if not self._navigate_to_node_goal_handle.accepted:
-            self.logger.error("Navigate to node goal request rejected by adapter. Trying again.")
+            self.logger.error("Navigate to node goal request rejected by adapter.")
             self._navigate_to_node_goal_handle = None
             self._current_node_goal = None
+            self._kill_order()
             return
 
         self.logger.info("Navigate to node goal request accepted by adapter.")

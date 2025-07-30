@@ -1625,8 +1625,22 @@ class VDA5050Controller(Node):
         # check result
         result = future.result().result
         if result.error:
-            self.logger.error(f'Action error: {result.error_code}')
+            self.logger.error(f'Failed to reach goal. Error: {result.error_code}')
             self._set_navigation_error(True)
+
+            # Notify master of the failure
+            error = VDAError()
+            error.error_type = "navigationError"
+            error.error_description = f"Error code: {result.error_code}"
+            error.error_level = VDAError.FATAL
+            error.error_references = [
+                VDAErrorReference(
+                    reference_key="node_id", reference_value=self._current_node_goal.node_id
+                )
+            ]
+
+            current_errors = self._current_state.errors
+            self._update_state({"errors": current_errors + [error]}, publish_now=True)
             return
         
         # When the order is cancelled, this callback should avoid continuing its logic

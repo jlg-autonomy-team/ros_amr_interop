@@ -123,7 +123,12 @@ class OrderRejectErrors(Enum):
     VALIDATION_ERROR = "validationOrder"
     ORDER_UPDATE_ERROR = "orderUpdateError"
     NO_ROUTE_ERROR = "noRouteError"
+    GOAL_REJECTED_ERROR = "goalRejectedError"
 
+class OrderExecutionErrors(Enum):
+    """Order Processing - Execution Error types."""
+
+    NAVIGATION_ERROR = "navigationError"
 
 class OrderAcceptModes(Enum):
     """Order Processing - Accept Modes."""
@@ -668,7 +673,7 @@ class VDA5050Controller(Node):
             error
             for error in self._current_state.errors
             if error.error_type
-            in [e.value for e in OrderRejectErrors] + [e.value for e in ActionErrors]
+            in [e.value for e in OrderRejectErrors] + [e.value for e in ActionErrors] + [e.value for e in OrderExecutionErrors]
         ]
         # Robot specific information filled by the adapter
         self._update_state(
@@ -1214,7 +1219,7 @@ class VDA5050Controller(Node):
         errors = [
             error
             for error in self._current_state.errors
-            if error.error_type not in [e.value for e in OrderRejectErrors]
+            if error.error_type not in [e.value for e in OrderRejectErrors] + [e.value for e in OrderExecutionErrors]
         ]
 
         # Update state
@@ -1599,6 +1604,21 @@ class VDA5050Controller(Node):
             self.logger.error("Navigate to node goal request rejected by adapter.")
             self._navigate_to_node_goal_handle = None
             self._current_node_goal = None
+
+            # Notify master of the failure
+            error = VDAError()
+            error.error_type = OrderRejectErrors.GOAL_REJECTED_ERROR.value
+            error.error_description = "Goal request rejected by adapter."
+            error.error_level = VDAError.FATAL
+            error.error_references = [
+                VDAErrorReference(
+                    reference_key="node_id", reference_value=self._current_node_goal.node_id
+                )
+            ]
+
+            current_errors = self._current_state.errors
+            self._update_state({"errors": current_errors + [error]}, publish_now=True)
+
             self._kill_order()
             return
 
@@ -1625,8 +1645,22 @@ class VDA5050Controller(Node):
         # check result
         result = future.result().result
         if result.error:
-            self.logger.error(f'Action error: {result.error_code}')
+            self.logger.error(f'Failed to reach goal. Error: {result.error_code}')
             self._set_navigation_error(True)
+
+            # Notify master of the failure
+            error = VDAError()
+            error.error_type = OrderExecutionErrors.NAVIGATION_ERROR.value
+            error.error_description = f"Error code: {result.error_code}"
+            error.error_level = VDAError.FATAL
+            error.error_references = [
+                VDAErrorReference(
+                    reference_key="node_id", reference_value=self._current_node_goal.node_id
+                )
+            ]
+
+            current_errors = self._current_state.errors
+            self._update_state({"errors": current_errors + [error]}, publish_now=True)
             return
         
         # When the order is cancelled, this callback should avoid continuing its logic

@@ -1326,6 +1326,7 @@ class VDA5050Controller(Node):
             self._update_state({"errors": current_errors + [error]}, publish_now=True)
             self._update_state({"errors": current_errors})
             self._cancel_action = None
+            self._set_active_block(False)
             return
 
         # Set cancelOrder action state to running
@@ -1357,7 +1358,8 @@ class VDA5050Controller(Node):
         self._current_order = VDAOrder(order_id="-1")
         self._cancel_action = None
         self._current_node_actions = []
-
+        self._set_active_block(False)
+        
         self.logger.info("Finished executing cancelOrder.")
 
     def _kill_order(self):

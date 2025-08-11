@@ -32,8 +32,11 @@
 # Various common utility functions.
 
 from datetime import datetime
+import os
 import re
 import json
+import jsonschema
+from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
 from rcl_interfaces.msg import ParameterDescriptor
 from rcl_interfaces.msg import ParameterType
@@ -310,3 +313,39 @@ def get_vda5050_ros2_topic(
     return (
         f"/{mqtt_topic}"
     )
+
+
+def validate_vda5050_payload(type: str, order: dict) -> list[tuple[str, str]]:
+    """
+    Validate the order structure against the VDA5050 schema.
+
+    Args:
+        type (str): Type of the payload, e.g. "order" or "instantActions".
+        order (dict): The order to validate.
+
+    Returns:
+        list[tuple[str, str]]: A list of tuples containing the location and error message
+        for each validation error.
+    """
+    schema_file = "order.schema" if type == "order" else "instantActions.schema"
+    with open(
+        os.path.join(
+            get_package_share_directory("vda5050_connector"),
+            "config",
+            "json_schemas",
+            schema_file,
+        )
+    ) as f:
+        schema = json.load(f)
+
+    validator = jsonschema.Draft202012Validator(
+        schema, format_checker=jsonschema.FormatChecker()
+    )
+    errors = sorted(validator.iter_errors(order), key=lambda e: e.path)
+
+    err_list = []
+    for e in errors:
+        loc = list(e.path)
+        err_list.append((loc, e.message))
+
+    return err_list

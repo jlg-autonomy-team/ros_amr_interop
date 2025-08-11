@@ -48,6 +48,7 @@ from vda5050_connector_py.utils import json_camel_to_snake_case
 from vda5050_connector_py.utils import read_str_parameter, read_int_parameter
 from vda5050_connector_py.utils import convert_ros_message_to_json
 from vda5050_connector_py.utils import get_vda5050_ts
+from vda5050_connector_py.utils import validate_vda5050_payload
 
 from vda5050_connector_py.vda5050_controller import DEFAULT_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS
 
@@ -350,9 +351,27 @@ class MQTTBridge(Node):
 
         try:
             if msg.topic.endswith("order"):
+                order_validation = validate_vda5050_payload(
+                    "order", json.loads(msg.payload)
+                )
+                if order_validation:
+                    self.logger.warn(f"❌ Invalid VDA5050 order message")
+                    for loc, e in order_validation:
+                        self.logger.warn(f"❌ At {loc if loc else '<root>'}: {e}")
+                    return
+                self.logger.info("✅ Valid VDA5050 order message")
                 vda_order_msg = VDAOrder(**generate_vda_order_msg(msg_json))
                 self._order_pub.publish(msg=vda_order_msg)
             if msg.topic.endswith("instantActions"):
+                instant_actions_validation = validate_vda5050_payload(
+                    "instantActions", json.loads(msg.payload)
+                )
+                if instant_actions_validation:
+                    self.logger.warn(f"❌ Invalid VDA5050 order message")
+                    for loc, e in instant_actions_validation:
+                        self.logger.warn(f"❌ At {loc if loc else '<root>'}: {e}")
+                    return
+                self.logger.info("✅ Valid VDA5050 instantActions message")
                 vda_instant_actions_message = VDAInstantActions(
                     **generate_vda_instant_action_msg(msg_json)
                 )

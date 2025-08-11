@@ -97,6 +97,12 @@ config
 launch
 DESTINATION share/${PROJECT_NAME}/)
 
+## VDA5050 SCHEMAS
+install(
+  DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../VDA5050/json_schemas
+  DESTINATION share/${PROJECT_NAME}/config/
+)
+
 # TEST
 
 if(BUILD_TESTING)

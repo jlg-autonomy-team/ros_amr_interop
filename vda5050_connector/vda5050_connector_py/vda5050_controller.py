@@ -1609,7 +1609,7 @@ class VDA5050Controller(Node):
             error = VDAError()
             error.error_type = OrderRejectErrors.GOAL_REJECTED_ERROR.value
             error.error_description = "Goal request rejected by adapter."
-            error.error_level = VDAError.FATAL
+            error.error_level = VDAError.WARNING
             error.error_references = [
                 VDAErrorReference(
                     reference_key="node_id", reference_value=self._current_node_goal.node_id
@@ -1655,7 +1655,7 @@ class VDA5050Controller(Node):
             error = VDAError()
             error.error_type = OrderExecutionErrors.NAVIGATION_ERROR.value
             error.error_description = f"Error code: {result.error_code}"
-            error.error_level = VDAError.FATAL
+            error.error_level = VDAError.WARNING
             error.error_references = [
                 VDAErrorReference(
                     reference_key="node_id", reference_value=self._current_node_goal.node_id
@@ -1679,7 +1679,7 @@ class VDA5050Controller(Node):
             error = VDAError()
             error.error_type = OrderRejectErrors.NO_ROUTE_ERROR.value
             error.error_description = "Failed to reach current node."
-            error.error_level = VDAError.FATAL
+            error.error_level = VDAError.WARNING
             error.error_references = [
                 VDAErrorReference(
                     reference_key="node_id", reference_value=self._current_node_goal.node_id

@@ -1440,11 +1440,9 @@ class VDA5050Controller(Node):
             return
 
         if self._has_active_pause():
-            self.logger.info("active_order: has pause")
             return
 
         if self._has_active_block():
-            self.logger.info("active_order: has block")
             return
 
         if len(self._current_node_actions) > 0:

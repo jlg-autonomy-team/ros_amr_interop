@@ -53,6 +53,9 @@
  */
 #include "vda5050_msgs/msg/error.hpp"
 #include "vda5050_msgs/msg/info.hpp"
+// JLG_CHANGES_START
+#include "vda5050_msgs/msg/jlg_info.hpp"
+// JLG_CHANGES_END
 #include "vda5050_msgs/msg/load.hpp"
 #include "vda5050_msgs/msg/order_state.hpp"
 

@@ -123,12 +123,16 @@ class OrderRejectErrors(Enum):
     VALIDATION_ERROR = "validationOrder"
     ORDER_UPDATE_ERROR = "orderUpdateError"
     NO_ROUTE_ERROR = "noRouteError"
+# JLG_CHANGES_START
     GOAL_REJECTED_ERROR = "goalRejectedError"
+# JLG_CHANGES_END
 
+# JLG_CHANGES_START
 class OrderExecutionErrors(Enum):
     """Order Processing - Execution Error types."""
 
     NAVIGATION_ERROR = "navigationError"
+# JLG_CHANGES_START
 
 class OrderAcceptModes(Enum):
     """Order Processing - Accept Modes."""
@@ -155,10 +159,12 @@ class VDA5050Controller(Node):
         """Configure resources needed by this node."""
         self._read_parameters()
 
+# JLG_CHANGES_START
         self._active_pause = False
         self._active_block = False
         self._retry_current_goal = False
         self._navigation_error = False
+# JLG_CHANGES_START
 
         self._cancel_action = None
         self._current_node_actions = []
@@ -673,7 +679,9 @@ class VDA5050Controller(Node):
             error
             for error in self._current_state.errors
             if error.error_type
+# JLG_CHANGES_START
             in [e.value for e in OrderRejectErrors] + [e.value for e in ActionErrors] + [e.value for e in OrderExecutionErrors]
+# JLG_CHANGES_END
         ]
         # Robot specific information filled by the adapter
         self._update_state(
@@ -686,9 +694,11 @@ class VDA5050Controller(Node):
                 "distance_since_last_node": order_state.state.distance_since_last_node,
                 "battery_state": order_state.state.battery_state,
                 "errors": current_errors + order_state.state.errors,
-                "information": order_state.state.information,
+                "informations": order_state.state.informations,
+# JLG_CHANGES_START
                 "operating_mode": order_state.state.operating_mode,
                 "safety_state": order_state.state.safety_state,
+# JLG_CHANGES_END
             }
         )
 
@@ -718,12 +728,14 @@ class VDA5050Controller(Node):
         self.logger.info(f"Received instant_actions msg with id: '{header_id}'")
 
         for action in instant_actions.actions:
+# JLG_CHANGES_START
             # Check if the action is a duplicate
             if self._is_duplicate_action(action.action_id):
                 self.logger.info(
                     f"Action '{action.action_id}' is a duplicate, skipping.'"
                 )
                 continue
+# JLG_CHANGES_END
 
             self.logger.info(
                 f"Processing action '{action.action_id}' of type '{action.action_type}'"
@@ -740,12 +752,14 @@ class VDA5050Controller(Node):
                 {"action_states": self._current_state.action_states + [action_state]}
             )
 
+# JLG_CHANGES_START
             if action.blocking_type is not VDAAction.NONE:
                 # do not allow driving
                 self._set_active_block(True)
 
                 # if already driving or retry required, retry when action completes
                 self._set_retry_current_node(self._retry_current_node() or self._is_navigation_active())
+# JLG_CHANGES_END
 
             if action.action_type == "cancelOrder":
                 self._cancel_action = action
@@ -872,6 +886,7 @@ class VDA5050Controller(Node):
         self._process_vda_action_goal_handle_dict.pop(current_action.action_id)
         self._update_action_status(current_action.action_id, current_action.action_status)
 
+# JLG_CHANGES_START
         pause_actions = {
             "startPause": True,
             "stopPause": False
@@ -884,6 +899,7 @@ class VDA5050Controller(Node):
             self._set_active_pause(pause_actions[current_action.action_type])
 
         self._set_active_block(False)
+# JLG_CHANGES_END
 
         self.logger.info(f"VDA Action finished. Result: {current_action}")
 
@@ -1221,7 +1237,9 @@ class VDA5050Controller(Node):
         errors = [
             error
             for error in self._current_state.errors
+# JLG_CHANGES_START
             if error.error_type not in [e.value for e in OrderRejectErrors] + [e.value for e in OrderExecutionErrors]
+# JLG_CHANGES_END
         ]
 
         # Update state
@@ -1328,7 +1346,9 @@ class VDA5050Controller(Node):
             self._update_state({"errors": current_errors + [error]}, publish_now=True)
             self._update_state({"errors": current_errors})
             self._cancel_action = None
+# JLG_CHANGES_START
             self._set_active_block(False)
+# JLG_CHANGES_END
             return
 
         # Set cancelOrder action state to running
@@ -1360,10 +1380,13 @@ class VDA5050Controller(Node):
         self._current_order = VDAOrder(order_id="-1")
         self._cancel_action = None
         self._current_node_actions = []
+# JLG_CHANGES_START
         self._set_active_block(False)
+# JLG_CHANGES_END
         
         self.logger.info("Finished executing cancelOrder.")
 
+# JLG_CHANGES_START
     def _kill_order(self):
         """
         Kill order based on processing failures.
@@ -1407,6 +1430,7 @@ class VDA5050Controller(Node):
         self._current_node_actions = []
 
         self.logger.info("Finished executing killOrder.")
+# JLG_CHANGES_END
 
     def _canceling_order(self) -> bool:
         """
@@ -1434,18 +1458,22 @@ class VDA5050Controller(Node):
             self._cancel_order()
             return
 
+# JLG_CHANGES_START
         if self._has_navigation_error():
             self._kill_order()
             return
+# JLG_CHANGES_END
 
         if not self._has_current_order():
             return
 
+# JLG_CHANGES_START
         if self._has_active_pause():
             return
 
         if self._has_active_block():
             return
+# JLG_CHANGES_END
 
         if len(self._current_node_actions) > 0:
             self._execute_node_actions()
@@ -1556,10 +1584,14 @@ class VDA5050Controller(Node):
             for node in self._current_order.nodes
             if node.sequence_id == self._current_state.last_node_sequence_id + 2
         )
+# JLG_CHANGES_START
         if next_node != self._current_node_goal or self._retry_current_node():
+# JLG_CHANGES_END
             self.logger.info(f"Processing node: {next_node}")
 
+# JLG_CHANGES_START
             self._set_retry_current_node(False)
+# JLG_CHANGES_END
             self.send_adapter_navigate_to_node(edge=next_edge, node=next_node)
         else:
             self.logger.error(f"{next_node} Already current goal")
@@ -1577,7 +1609,9 @@ class VDA5050Controller(Node):
         """
         # Create goal message with edge and node parameters
         goal_msg = NavigateToNode.Goal()
+# JLG_CHANGES_START
         goal_msg.final = len(self._current_state.node_states) <= 1
+# JLG_CHANGES_END
         goal_msg.edge = edge
         goal_msg.node = node
 
@@ -1603,8 +1637,9 @@ class VDA5050Controller(Node):
         """
         self._navigate_to_node_goal_handle = future.result()
         if not self._navigate_to_node_goal_handle.accepted:
-            self.logger.error("Navigate to node goal request rejected by adapter.")
+            self.logger.error("Navigate to node goal request rejected by adapter. Trying again.")
 
+# JLG_CHANGES_START
             # Notify master of the failure
             error = VDAError()
             error.error_type = OrderRejectErrors.GOAL_REJECTED_ERROR.value
@@ -1623,6 +1658,7 @@ class VDA5050Controller(Node):
             self._update_state({"errors": current_errors + [error]}, publish_now=True)
 
             self._kill_order()
+# JLG_CHANGES_END
             return
 
         self.logger.info("Navigate to node goal request accepted by adapter.")
@@ -1645,6 +1681,7 @@ class VDA5050Controller(Node):
         """
         self._navigate_to_node_goal_handle = None
 
+# JLG_CHANGES_START
         # check result
         result = future.result().result
         if result.error:
@@ -1665,7 +1702,8 @@ class VDA5050Controller(Node):
             current_errors = self._current_state.errors
             self._update_state({"errors": current_errors + [error]}, publish_now=True)
             return
-        
+# JLG_CHANGES_END
+
         # When the order is cancelled, this callback should avoid continuing its logic
         if self._canceling_order():
             return
@@ -1679,7 +1717,9 @@ class VDA5050Controller(Node):
             error = VDAError()
             error.error_type = OrderRejectErrors.NO_ROUTE_ERROR.value
             error.error_description = "Failed to reach current node."
+# JLG_CHANGES_START
             error.error_level = VDAError.WARNING
+# JLG_CHANGES_END
             error.error_references = [
                 VDAErrorReference(
                     reference_key="node_id", reference_value=self._current_node_goal.node_id
@@ -1691,6 +1731,7 @@ class VDA5050Controller(Node):
 
             return
 
+# JLG_CHANGES_START
         if self._has_active_pause():
             # Retry _SHOULD_ always be set if a startPause action is received
             # but this will handle the case if the action has a blocking type of NONE
@@ -1702,6 +1743,7 @@ class VDA5050Controller(Node):
             # the active block is released before this callback has time to run
             # so retry is set on the action receive
             return
+# JLG_CHANGES_END
 
         last_edge = next(
             edge
@@ -2123,6 +2165,7 @@ class VDA5050Controller(Node):
         # TODO: This seems to be not defined in the VDA5050 schema.
         return 0
 
+# JLG_CHANGES_START
     # Processing Helpers
 
     def _set_active_pause(self, pause: bool):
@@ -2236,3 +2279,4 @@ class VDA5050Controller(Node):
             action.action_id == action_id
             for action in self._current_state.action_states
         )
+# JLG_CHANGES_END

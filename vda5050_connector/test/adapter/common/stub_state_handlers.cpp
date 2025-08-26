@@ -43,7 +43,9 @@
 #include "geometry_msgs/msg/vector3.hpp"
 #include "vda5050_msgs/msg/error.hpp"
 #include "vda5050_msgs/msg/info.hpp"
+// JLG_CHANGES_START
 #include "vda5050_msgs/msg/jlg_info.hpp"
+// JLG_CHANGES_END
 #include "vda5050_msgs/msg/order_state.hpp"
 
 namespace test
@@ -74,8 +76,10 @@ class StubStateHandlerData : public adapter::StateHandler
 {
 public:
   StubStateHandlerData() = default;
+// JLG_CHANGES_START
   void configure() override { current_state_->add_information(vda5050_msgs::msg::JLGInfo()); }
   void execute() override { current_state_->add_information(vda5050_msgs::msg::JLGInfo()); }
+// JLG_CHANGES_END
 };
 }  // namespace test
 

@@ -752,15 +752,6 @@ class VDA5050Controller(Node):
                 {"action_states": self._current_state.action_states + [action_state]}
             )
 
-# JLG_CHANGES_START
-            if action.blocking_type is not VDAAction.NONE:
-                # do not allow driving
-                self._set_active_block(True)
-
-                # if already driving or retry required, retry when action completes
-                self._set_retry_current_node(self._retry_current_node() or self._is_navigation_active())
-# JLG_CHANGES_END
-
             if action.action_type == "cancelOrder":
                 self._cancel_action = action
                 continue
@@ -849,6 +840,15 @@ class VDA5050Controller(Node):
                 " rejected by the adapter"
             )
             return
+
+# JLG_CHANGES_START
+        if action.blocking_type is not VDAAction.NONE:
+            # do not allow driving
+            self._set_active_block(True)
+
+            # if already driving or retry required, retry when action completes
+            self._set_retry_current_node(self._retry_current_node() or self._is_navigation_active())
+# JLG_CHANGES_END
 
         self._process_vda_action_goal_handle_dict[action.action_id] = _goal_handle
         self.logger.info(
@@ -1347,7 +1347,7 @@ class VDA5050Controller(Node):
             self._update_state({"errors": current_errors})
             self._cancel_action = None
 # JLG_CHANGES_START
-            self._set_active_block(False)
+            #self._set_active_block(False)
 # JLG_CHANGES_END
             return
 
@@ -1381,7 +1381,7 @@ class VDA5050Controller(Node):
         self._cancel_action = None
         self._current_node_actions = []
 # JLG_CHANGES_START
-        self._set_active_block(False)
+        #self._set_active_block(False)
 # JLG_CHANGES_END
         
         self.logger.info("Finished executing cancelOrder.")
@@ -1472,6 +1472,7 @@ class VDA5050Controller(Node):
             return
 
         if self._has_active_block():
+            self.logger.info("Active block.")
             return
 # JLG_CHANGES_END
 

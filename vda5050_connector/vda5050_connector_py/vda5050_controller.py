@@ -132,7 +132,7 @@ class OrderExecutionErrors(Enum):
     """Order Processing - Execution Error types."""
 
     NAVIGATION_ERROR = "navigationError"
-# JLG_CHANGES_START
+# JLG_CHANGES_END
 
 class OrderAcceptModes(Enum):
     """Order Processing - Accept Modes."""
@@ -164,7 +164,7 @@ class VDA5050Controller(Node):
         self._active_block = False
         self._retry_current_goal = False
         self._navigation_error = False
-# JLG_CHANGES_START
+# JLG_CHANGES_END
 
         self._cancel_action = None
         self._current_node_actions = []

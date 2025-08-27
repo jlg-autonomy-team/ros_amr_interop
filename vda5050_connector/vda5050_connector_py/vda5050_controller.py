@@ -694,8 +694,8 @@ class VDA5050Controller(Node):
                 "distance_since_last_node": order_state.state.distance_since_last_node,
                 "battery_state": order_state.state.battery_state,
                 "errors": current_errors + order_state.state.errors,
-                "informations": order_state.state.informations,
 # JLG_CHANGES_START
+                "information": order_state.state.information,
                 "operating_mode": order_state.state.operating_mode,
                 "safety_state": order_state.state.safety_state,
 # JLG_CHANGES_END

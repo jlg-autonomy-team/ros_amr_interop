@@ -108,7 +108,9 @@ public:
 // JLG_CHANGES_END
   {
     std::unique_lock lock(mutex);
-    order_state_.informations.push_back(info);
+// JLG_CHANGES_START
+    order_state_.information.push_back(info);
+// JLG_CHANGES_END
   }
 
   /**
@@ -139,7 +141,9 @@ public:
   {
     std::unique_lock lock(mutex);
     order_state_.loads.clear();
-    order_state_.informations.clear();
+// JLG_CHANGES_START
+    order_state_.information.clear();
+// JLG_CHANGES_END
     order_state_.errors.clear();
   }
 

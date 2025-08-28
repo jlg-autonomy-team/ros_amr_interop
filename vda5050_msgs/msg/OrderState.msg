@@ -66,6 +66,8 @@ string operating_mode                                # Enum {AUTOMATIC, SEMIAUTO
 vda5050_msgs/Error[] errors                          # Array of errorobjects. Empty array if there are no errors.
 
 # JLG_CHANGES_START
+# 1. Standard defines this as information, not information's'
+# 2. Define our own information structure (this was a mistake and we should have used key-value pairs instead)
 vda5050_msgs/JLGInfo[] information                   # Array of info-objects. An empty array indicates that the AGV has no information.
                                                      # This should only be used for visualization or debugging – it must not be used for logic in master control
 # JLG_CHANGES_END

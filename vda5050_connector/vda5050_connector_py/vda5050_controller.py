@@ -842,6 +842,7 @@ class VDA5050Controller(Node):
             return
 
 # JLG_CHANGES_START
+        # handle blocking actions
         if action.blocking_type is not VDAAction.NONE:
             # do not allow driving
             self._set_active_block(True)
@@ -887,6 +888,7 @@ class VDA5050Controller(Node):
         self._update_action_status(current_action.action_id, current_action.action_status)
 
 # JLG_CHANGES_START
+        # handle pauses
         pause_actions = {
             "startPause": True,
             "stopPause": False
@@ -1346,9 +1348,6 @@ class VDA5050Controller(Node):
             self._update_state({"errors": current_errors + [error]}, publish_now=True)
             self._update_state({"errors": current_errors})
             self._cancel_action = None
-# JLG_CHANGES_START
-            #self._set_active_block(False)
-# JLG_CHANGES_END
             return
 
         # Set cancelOrder action state to running
@@ -1380,9 +1379,6 @@ class VDA5050Controller(Node):
         self._current_order = VDAOrder(order_id="-1")
         self._cancel_action = None
         self._current_node_actions = []
-# JLG_CHANGES_START
-        #self._set_active_block(False)
-# JLG_CHANGES_END
         
         self.logger.info("Finished executing cancelOrder.")
 
@@ -1719,6 +1715,7 @@ class VDA5050Controller(Node):
             error.error_type = OrderRejectErrors.NO_ROUTE_ERROR.value
             error.error_description = "Failed to reach current node."
 # JLG_CHANGES_START
+            # this is not a FATAL error so change to WARNING
             error.error_level = VDAError.WARNING
 # JLG_CHANGES_END
             error.error_references = [

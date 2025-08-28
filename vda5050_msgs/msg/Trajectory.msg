@@ -1,6 +1,7 @@
 # Points defining a spline. Theta allows holonomic vehicles to rotate along the trajecotry.
 
 # JLG_CHANGES_START
+# Navithor has a bug where this is defined as an int32, not a float64
 int32 degree 1                            # Range: [1 … infinity) Defines the number of control points that influence
                                           # any given point on the curve. Increasing the degree increases continuity.
                                           # If not defined, the default value is 1.

@@ -1268,6 +1268,12 @@ class VDA5050Controller(Node):
             # Note: the standard assumes the robot is at the first node of the order.
             # Otherwise, the order gets rejected and this method is not called.
             self._process_node(self._current_order.nodes[0])
+        # JLG_CHANGES_START
+        else:
+            # On stitching, the stitch node is not re-processed and therefore not removed. 
+            # Remove the stitch node here because it has already been processed.
+            del self._current_state.node_states[0]
+        # JLG_CHANGES_END
 
     def _reject_order(self, order: VDAOrder, error: OrderRejectErrors, description: str = ""):
         """

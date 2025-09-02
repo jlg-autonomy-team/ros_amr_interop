@@ -53,6 +53,9 @@
  */
 #include "vda5050_msgs/msg/error.hpp"
 #include "vda5050_msgs/msg/info.hpp"
+// JLG_CHANGES_START
+#include "vda5050_msgs/msg/jlg_info.hpp"
+// JLG_CHANGES_END
 #include "vda5050_msgs/msg/load.hpp"
 #include "vda5050_msgs/msg/order_state.hpp"
 
@@ -97,13 +100,17 @@ public:
   }
 
   /**
-   * @brief Add a new information msg into the information array of the order state
+   * @brief Add a new information msg into the informations array of the order state
    * Only one thread/writer can modify the order_state.
    */
+// JLG_CHANGES_START
   void add_information(const vda5050_msgs::msg::JLGInfo & info)
+// JLG_CHANGES_END
   {
     std::unique_lock lock(mutex);
+// JLG_CHANGES_START
     order_state_.information.push_back(info);
+// JLG_CHANGES_END
   }
 
   /**
@@ -127,14 +134,16 @@ public:
   }
 
   /**
-   * @brief Clear the order state arrays (load, information and errors).
+   * @brief Clear the order state arrays (load, informations and errors).
    * Only one thread/writer can clear the order_state.
    */
   void clear()
   {
     std::unique_lock lock(mutex);
     order_state_.loads.clear();
+// JLG_CHANGES_START
     order_state_.information.clear();
+// JLG_CHANGES_END
     order_state_.errors.clear();
   }
 

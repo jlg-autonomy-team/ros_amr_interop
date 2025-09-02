@@ -275,7 +275,9 @@ def get_vda5050_mqtt_topic(
 
 
 def get_vda5050_ros2_topic(
+# JLG_CHANGES_START
     manufacturer, serial_number, topic, interface_name="uagv", major_version="v2"
+# JLG_CHANGES_END
 ):
     """
     Return ROS2 topics used for communication between controller and adapter.

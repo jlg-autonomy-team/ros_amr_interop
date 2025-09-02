@@ -43,7 +43,9 @@ namespace utils
 bool read_bool_parameter(
   rclcpp::Node * node, const std::string & param_name, const bool default_val)
 {
+// JLG_CHANGES_START
   bool temp{false};
+// JLG_CHANGES_END
   node->declare_parameter<bool>(param_name, default_val);
   node->get_parameter(param_name, temp);
   return temp;

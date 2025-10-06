@@ -306,7 +306,9 @@ class MQTTBridge(Node):
         self._last_connection_msg = None
 
         # Connect to MQTT broker
-        self.mqtt_client.connect_async(host=self.mqtt_address, port=int(self.mqtt_port))
+        self.mqtt_client.connect_async(
+            host=self.mqtt_address, port=int(self.mqtt_port), keepalive=10
+        )
         self.mqtt_client.loop_start()
 
         self.on_configure()
@@ -379,6 +381,11 @@ class MQTTBridge(Node):
             )
             while not self.mqtt_client.is_connected():
                 try:
+                    try:
+                        self.mqtt_client.loop_stop()
+                        self.mqtt_client.disconnect()
+                    except Exception:
+                        pass
                     self.logger.info("Reconfiguring mqtt bridge client object...")
                     self.configure()
                     # self.mqtt_client.reconnect()

@@ -307,7 +307,7 @@ class MQTTBridge(Node):
 
         # Connect to MQTT broker
         self.mqtt_client.connect_async(
-            host=self.mqtt_address, port=int(self.mqtt_port), keepalive=10
+            host=self.mqtt_address, port=int(self.mqtt_port), keepalive=30
         )
         self.mqtt_client.loop_start()
 

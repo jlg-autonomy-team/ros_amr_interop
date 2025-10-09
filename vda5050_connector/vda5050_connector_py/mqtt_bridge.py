@@ -38,6 +38,7 @@ import copy
 import json
 import ssl
 import os
+import time
 
 # ROS dependencies / utils
 from rclpy.node import Node
@@ -49,7 +50,10 @@ from vda5050_connector_py.utils import read_str_parameter, read_int_parameter
 from vda5050_connector_py.utils import convert_ros_message_to_json
 from vda5050_connector_py.utils import get_vda5050_ts
 
-from vda5050_connector_py.vda5050_controller import DEFAULT_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS
+from vda5050_connector_py.vda5050_controller import (
+    DEFAULT_PROTOCOL_VERSION,
+    SUPPORTED_PROTOCOL_VERSIONS,
+)
 
 # ROS msgs / srvs / actions
 from vda5050_msgs.msg import Action as VDAAction
@@ -221,6 +225,7 @@ def generate_vda5050_topic_alias(vda_version):
             f"but got {vda_version}"
         )
 
+
 class MQTTBridge(Node):
     """Translates VDA5050 MQTT messages from and to ROS2."""
 
@@ -231,12 +236,14 @@ class MQTTBridge(Node):
         # Declare Node configuration parameter. Use default values if no parameters
         # are defined on launchfile. Provide the parameter when running the launchfile
         # by using ``foo.launch.py mqtt_address:=localhost mqtt_port:=1883 ...``
-        mqtt_address = read_str_parameter(self, "mqtt_address", "localhost")
-        mqtt_port = read_int_parameter(self, "mqtt_port", 1883)
-        mqtt_username = read_str_parameter(self, "mqtt_username", "")
-        mqtt_password = read_str_parameter(self, "mqtt_password", "")
+        self.mqtt_address = read_str_parameter(self, "mqtt_address", "localhost")
+        self.mqtt_port = read_int_parameter(self, "mqtt_port", 1883)
+        self.mqtt_username = read_str_parameter(self, "mqtt_username", "")
+        self.mqtt_password = read_str_parameter(self, "mqtt_password", "")
 
-        self.vda5050_version = read_str_parameter(self, "vda5050_protocol_version", "2.0.0")
+        self.vda5050_version = read_str_parameter(
+            self, "vda5050_protocol_version", "2.0.0"
+        )
         self.vda5050_version_alias = generate_vda5050_topic_alias(self.vda5050_version)
 
         self._manufacturer_name = read_str_parameter(
@@ -246,6 +253,9 @@ class MQTTBridge(Node):
 
         self._interface_name = read_str_parameter(self, "interface_name", "uagv")
 
+        self.configure()
+
+    def configure(self):
         # Configure MQTT
         self.mqtt_client = mqtt_client.Client()
         self.mqtt_client.on_connect = self.on_connect_mqtt
@@ -253,7 +263,7 @@ class MQTTBridge(Node):
         self.mqtt_client.on_disconnect = self.on_disconnect_mqtt
 
         # Enable TLS if username is provided
-        if mqtt_username:
+        if self.mqtt_username:
             self.mqtt_client.tls_set(
                 ca_certs=os.getenv(
                     key="VDA5050_CONNECTOR_TLS_CA_CERT",
@@ -262,7 +272,7 @@ class MQTTBridge(Node):
                 tls_version=ssl.PROTOCOL_TLSv1_2,
             )
             self.mqtt_client.username_pw_set(
-                username=mqtt_username, password=mqtt_password
+                username=self.mqtt_username, password=self.mqtt_password
             )
 
         # Configure will message or last testament message
@@ -296,7 +306,9 @@ class MQTTBridge(Node):
         self._last_connection_msg = None
 
         # Connect to MQTT broker
-        self.mqtt_client.connect_async(host=mqtt_address, port=int(mqtt_port))
+        self.mqtt_client.connect_async(
+            host=self.mqtt_address, port=int(self.mqtt_port), keepalive=30
+        )
         self.mqtt_client.loop_start()
 
         self.on_configure()
@@ -369,9 +381,17 @@ class MQTTBridge(Node):
             )
             while not self.mqtt_client.is_connected():
                 try:
-                    self.mqtt_client.reconnect()
+                    try:
+                        self.mqtt_client.loop_stop()
+                        self.mqtt_client.disconnect()
+                    except Exception:
+                        pass
+                    self.logger.info("Reconfiguring mqtt bridge client object...")
+                    self.configure()
+                    # self.mqtt_client.reconnect()
                 except OSError:
                     pass
+                time.sleep(1)
         else:
             self.logger.info("Disconnected from MQTT Broker!")
 

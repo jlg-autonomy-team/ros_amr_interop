@@ -281,7 +281,7 @@ class MQTTBridge(Node):
             serial_number=self._serial_number,
             topic="connection",
             major_version=self.vda5050_version_alias,
-            interface_name=self._interface_name,
+            interface_name=self._interface_name
         )
 
         # NOTE: will payload cannot be set dynamically or updated
@@ -325,7 +325,7 @@ class MQTTBridge(Node):
                     serial_number=self._serial_number,
                     topic="order",
                     major_version=self.vda5050_version_alias,
-                    interface_name=self._interface_name,
+                    interface_name=self._interface_name
                 )
             )
             self.mqtt_client.subscribe(
@@ -334,7 +334,7 @@ class MQTTBridge(Node):
                     serial_number=self._serial_number,
                     topic="instantActions",
                     major_version=self.vda5050_version_alias,
-                    interface_name=self._interface_name,
+                    interface_name=self._interface_name
                 )
             )
             self._publish_connection(
@@ -409,7 +409,7 @@ class MQTTBridge(Node):
                 manufacturer=self._manufacturer_name,
                 serial_number=self._serial_number,
                 topic="state",
-                interface_name=self._interface_name,
+                interface_name=self._interface_name
             ),
             callback=self._publish_state,
             qos_profile=10,
@@ -421,7 +421,7 @@ class MQTTBridge(Node):
                 manufacturer=self._manufacturer_name,
                 serial_number=self._serial_number,
                 topic="connection",
-                interface_name=self._interface_name,
+                interface_name=self._interface_name
             ),
             callback=self._publish_connection,
             qos_profile=10,
@@ -433,7 +433,7 @@ class MQTTBridge(Node):
                 manufacturer=self._manufacturer_name,
                 serial_number=self._serial_number,
                 topic="visualization",
-                interface_name=self._interface_name,
+                interface_name=self._interface_name
             ),
             callback=self._publish_visualization,
             qos_profile=10,
@@ -445,7 +445,7 @@ class MQTTBridge(Node):
                 manufacturer=self._manufacturer_name,
                 serial_number=self._serial_number,
                 topic="order",
-                interface_name=self._interface_name,
+                interface_name=self._interface_name
             ),
             qos_profile=10,
         )
@@ -456,7 +456,7 @@ class MQTTBridge(Node):
                 manufacturer=self._manufacturer_name,
                 serial_number=self._serial_number,
                 topic="instantActions",
-                interface_name=self._interface_name,
+                interface_name=self._interface_name
             ),
             qos_profile=10,
         )
@@ -488,7 +488,7 @@ class MQTTBridge(Node):
                 serial_number=self._serial_number,
                 topic="order",
                 major_version=self.vda5050_version_alias,
-                interface_name=self._interface_name,
+                interface_name=self._interface_name
             )
         )
         self.mqtt_client.unsubscribe(
@@ -497,7 +497,7 @@ class MQTTBridge(Node):
                 serial_number=self._serial_number,
                 topic="instantActions",
                 major_version=self.vda5050_version_alias,
-                interface_name=self._interface_name,
+                interface_name=self._interface_name
             )
         )
 
@@ -531,7 +531,7 @@ class MQTTBridge(Node):
             serial_number=self._serial_number,
             topic="state",
             major_version=self.vda5050_version_alias,
-            interface_name=self._interface_name,
+            interface_name=self._interface_name
         )
         self._publish_to_topic(msg, topic)
 
@@ -555,7 +555,7 @@ class MQTTBridge(Node):
             serial_number=self._serial_number,
             topic="connection",
             major_version=self.vda5050_version_alias,
-            interface_name=self._interface_name,
+            interface_name=self._interface_name
         )
         self._publish_to_topic(msg, topic)
 
@@ -573,6 +573,6 @@ class MQTTBridge(Node):
             serial_number=self._serial_number,
             topic="visualization",
             major_version=self.vda5050_version_alias,
-            interface_name=self._interface_name,
+            interface_name=self._interface_name
         )
         self._publish_to_topic(msg, topic)

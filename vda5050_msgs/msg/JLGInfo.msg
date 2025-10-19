@@ -6,3 +6,4 @@ uint8 paired_status
 uint32 paired_amr
 uint32[] acu_dtcs
 uint32[] gm_dtcs
+string acu_software_version

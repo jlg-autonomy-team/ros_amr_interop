@@ -1,11 +1,15 @@
 # Goal
+# JLG_CHANGES_START
 bool final
+# JLG_CHANGES_END
 vda5050_msgs/Edge edge
 vda5050_msgs/Node node
 ---
 # Result
+# JLG_CHANGES_START
 bool error
 uint32 error_code
+# JLG_CHANGES_END
 ---
 # Feedback
 vda5050_msgs/AGVPosition position

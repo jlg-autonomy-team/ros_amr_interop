@@ -53,7 +53,10 @@ from talos_msgs.msg import DTC
 from vda5050_connector_py.utils import get_vda5050_mqtt_topic
 from vda5050_connector_py.utils import get_vda5050_ros2_topic
 from vda5050_connector_py.utils import json_camel_to_snake_case
-from vda5050_connector_py.utils import read_str_parameter, read_int_parameter, read_bool_parameter
+from vda5050_connector_py.utils import read_str_parameter, read_int_parameter
+# JLG_CHANGES_START
+from vda5050_connector_py.utils import read_bool_parameter
+# JLG_CHANGES_STOP
 from vda5050_connector_py.utils import convert_ros_message_to_json
 from vda5050_connector_py.utils import get_vda5050_ts
 # JLG_CHANGES_START
@@ -379,7 +382,9 @@ class MQTTBridge(Node):
             self.logger.debug(f"Received '{msg_json}' from '{msg.topic}' topic")
         except json.decoder.JSONDecodeError:
             self.logger.error(f"Failed to decode message: '{msg.payload}'")
+            # JLG_CHANGES_START
             self.call_dtc_force_latch(self.invalid_order_dtc)
+            # JLG_CHANGES_STOP
             return
 
         # JLG_CHANGES_START

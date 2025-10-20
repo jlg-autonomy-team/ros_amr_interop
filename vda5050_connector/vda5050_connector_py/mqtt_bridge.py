@@ -40,11 +40,15 @@ import ssl
 import os
 
 # ROS dependencies / utils
+# JLG_CHANGES_START
 import rclpy
+# JLG_CHANGES_STOP
 from rclpy.node import Node
 
+# JLG_CHANGES_START
 from talos_msgs.srv import DTCUnlatch
 from talos_msgs.msg import DTC
+# JLG_CHANGES_STOP
 
 from vda5050_connector_py.utils import get_vda5050_mqtt_topic
 from vda5050_connector_py.utils import get_vda5050_ros2_topic
@@ -52,8 +56,10 @@ from vda5050_connector_py.utils import json_camel_to_snake_case
 from vda5050_connector_py.utils import read_str_parameter, read_int_parameter, read_bool_parameter
 from vda5050_connector_py.utils import convert_ros_message_to_json
 from vda5050_connector_py.utils import get_vda5050_ts
+# JLG_CHANGES_START
 from vda5050_connector_py.utils import has_unique_uuids
 from vda5050_connector_py.utils import validate_vda5050_payload
+# JLG_CHANGES_STOP
 
 from vda5050_connector_py.vda5050_controller import DEFAULT_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS
 
@@ -251,8 +257,10 @@ class MQTTBridge(Node):
         self._serial_number = read_str_parameter(self, "serial_number", "robot_1")
 
         self._interface_name = read_str_parameter(self, "interface_name", "uagv")
+        # JLG_CHANGES_START
         self.enable_vda5050_validation = read_bool_parameter(self, "enable_vda5050_validation", True)
         self.invalid_order_dtc = read_int_parameter(self, "invalid_order_dtc", 2460)
+        # JLG_CHANGES_STOP
 
         # Configure MQTT
         self.mqtt_client = mqtt_client.Client()
@@ -309,6 +317,7 @@ class MQTTBridge(Node):
 
         self.on_configure()
 
+        # JLG_CHANGES_START
         # Create DTC latching/unlatching services
         self.dtc_unlatch_client = self.create_client(
             DTCUnlatch, "diagnostics/unlatch_dtc"
@@ -316,6 +325,7 @@ class MQTTBridge(Node):
         self.dtc_force_latch_client = self.create_client(
             DTCUnlatch, "diagnostics/force_latch_dtc"
         )
+        # JLG_CHANGES_STOP
 
         self.logger.info(f"Node {NODE_NAME} has started successfully.")
 
@@ -358,9 +368,11 @@ class MQTTBridge(Node):
     def on_message_mqtt(self, client, userdata, msg):
         """MQTT client message callback."""
 
+        # JLG_CHANGES_START
         # First unlatch invalid order DTC
         if self.enable_vda5050_validation:
             self.call_dtc_unlatch(self.invalid_order_dtc)
+        # JLG_CHANGES_STOP
 
         try:
             msg_json = json_camel_to_snake_case(msg.payload)
@@ -370,6 +382,7 @@ class MQTTBridge(Node):
             self.call_dtc_force_latch(self.invalid_order_dtc)
             return
 
+        # JLG_CHANGES_START
         if self.enable_vda5050_validation:
             # Check uuid uniqueness
             if has_unique_uuids(msg_json) is False:
@@ -409,6 +422,7 @@ class MQTTBridge(Node):
             except KeyError as ex:
                 self.logger.warn(f"Ignoring invalid VDA5050 message: {ex}.")
                 return
+        # JLG_CHANGES_STOP
         else:
             try:
                 if msg.topic.endswith("order"):
@@ -620,6 +634,7 @@ class MQTTBridge(Node):
         )
         self._publish_to_topic(msg, topic)
 
+    # JLG_CHANGES_START
     def call_dtc_unlatch(self, dtc: int):
         """
         Call the DTC unlatch service.
@@ -691,3 +706,4 @@ class MQTTBridge(Node):
         except Exception as e:
             self.logger.error(f"DTC force latch service call failed: {e}")
             return False
+    # JLG_CHANGES_STOP

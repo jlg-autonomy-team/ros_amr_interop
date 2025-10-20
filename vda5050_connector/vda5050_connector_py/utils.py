@@ -36,7 +36,9 @@ import os
 import re
 import json
 import jsonschema
+# JLG_CHANGES_START
 import uuid
+# JLG_CHANGES_STOP
 from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
 from rcl_interfaces.msg import ParameterDescriptor
@@ -317,7 +319,7 @@ def get_vda5050_ros2_topic(
         f"/{mqtt_topic}"
     )
 
-
+# JLG_CHANGES_START
 def validate_vda5050_payload(type: str, order: dict) -> list[tuple[str, str]]:
     """
     Validate the order structure against the VDA5050 schema.
@@ -384,3 +386,4 @@ def collect_uuids(data):
 def has_unique_uuids(payload) -> bool:
     uuids = collect_uuids(payload)
     return len(uuids) == len(set(uuids))
+# JLG_CHANGES_STOP

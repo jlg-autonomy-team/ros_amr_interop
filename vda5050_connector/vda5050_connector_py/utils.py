@@ -36,6 +36,7 @@ import os
 import re
 import json
 import jsonschema
+import uuid
 from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
 from rcl_interfaces.msg import ParameterDescriptor
@@ -351,3 +352,35 @@ def validate_vda5050_payload(type: str, order: dict) -> list[tuple[str, str]]:
         err_list.append((loc, e.message))
 
     return err_list
+
+
+def is_uuid(value: str) -> bool:
+    """Return True if string is a valid UUID."""
+    try:
+        uuid.UUID(value)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+def collect_uuids(data):
+    """Recursively collect UUID values from a dict/list."""
+    found = []
+
+    if isinstance(data, dict):
+        for value in data.values():
+            found.extend(collect_uuids(value))
+
+    elif isinstance(data, list):
+        for item in data:
+            found.extend(collect_uuids(item))
+
+    elif isinstance(data, str) and is_uuid(data):
+        found.append(data)
+
+    return found
+
+
+def has_unique_uuids(payload) -> bool:
+    uuids = collect_uuids(payload)
+    return len(uuids) == len(set(uuids))

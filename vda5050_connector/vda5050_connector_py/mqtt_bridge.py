@@ -49,7 +49,7 @@ from talos_msgs.msg import DTC
 from vda5050_connector_py.utils import get_vda5050_mqtt_topic
 from vda5050_connector_py.utils import get_vda5050_ros2_topic
 from vda5050_connector_py.utils import json_camel_to_snake_case
-from vda5050_connector_py.utils import read_str_parameter, read_int_parameter
+from vda5050_connector_py.utils import read_str_parameter, read_int_parameter, read_bool_parameter
 from vda5050_connector_py.utils import convert_ros_message_to_json
 from vda5050_connector_py.utils import get_vda5050_ts
 from vda5050_connector_py.utils import has_unique_uuids
@@ -251,6 +251,7 @@ class MQTTBridge(Node):
         self._serial_number = read_str_parameter(self, "serial_number", "robot_1")
 
         self._interface_name = read_str_parameter(self, "interface_name", "uagv")
+        self.enable_vda5050_validation = read_bool_parameter(self, "enable_vda5050_validation", True)
         self.invalid_order_dtc = read_int_parameter(self, "invalid_order_dtc", 2460)
 
         # Configure MQTT
@@ -358,7 +359,8 @@ class MQTTBridge(Node):
         """MQTT client message callback."""
 
         # First unlatch invalid order DTC
-        self.call_dtc_unlatch(self.invalid_order_dtc)
+        if self.enable_vda5050_validation:
+            self.call_dtc_unlatch(self.invalid_order_dtc)
 
         try:
             msg_json = json_camel_to_snake_case(msg.payload)
@@ -368,44 +370,59 @@ class MQTTBridge(Node):
             self.call_dtc_force_latch(self.invalid_order_dtc)
             return
 
-        # Check uuid uniqueness
-        if has_unique_uuids(msg_json) is False:
-            self.logger.warn(f"❌ Invalid VDA5050 message: duplicated UUIDs found")
-            self.call_dtc_force_latch(self.invalid_order_dtc)
-            return
+        if self.enable_vda5050_validation:
+            # Check uuid uniqueness
+            if has_unique_uuids(msg_json) is False:
+                self.logger.warn(f"❌ Invalid VDA5050 message: duplicated UUIDs found")
+                self.call_dtc_force_latch(self.invalid_order_dtc)
+                return
 
-        try:
-            if msg.topic.endswith("order"):
-                order_validation = validate_vda5050_payload(
-                    "order", json.loads(msg.payload)
-                )
-                if order_validation:
-                    self.logger.warn(f"❌ Invalid VDA5050 order message")
-                    for loc, e in order_validation:
-                        self.logger.warn(f"❌ At {loc if loc else '<root>'}: {e}")
-                    self.call_dtc_force_latch(self.invalid_order_dtc)
-                    return
-                self.logger.info("✅ Valid VDA5050 order message")
-                vda_order_msg = VDAOrder(**generate_vda_order_msg(msg_json))
-                self._order_pub.publish(msg=vda_order_msg)
-            if msg.topic.endswith("instantActions"):
-                instant_actions_validation = validate_vda5050_payload(
-                    "instantActions", json.loads(msg.payload)
-                )
-                if instant_actions_validation:
-                    self.logger.warn(f"❌ Invalid VDA5050 instantActions message")
-                    for loc, e in instant_actions_validation:
-                        self.logger.warn(f"❌ At {loc if loc else '<root>'}: {e}")
-                    self.call_dtc_force_latch(self.invalid_order_dtc)
-                    return
-                self.logger.info("✅ Valid VDA5050 instantActions message")
-                vda_instant_actions_message = VDAInstantActions(
-                    **generate_vda_instant_action_msg(msg_json)
-                )
-                self._instant_actions_pub.publish(msg=vda_instant_actions_message)
-        except KeyError as ex:
-            self.logger.warn(f"Ignoring invalid VDA5050 message: {ex}.")
-            return
+            try:
+                if msg.topic.endswith("order"):
+                    order_validation = validate_vda5050_payload(
+                        "order", json.loads(msg.payload)
+                    )
+                    if order_validation:
+                        self.logger.warn(f"❌ Invalid VDA5050 order message")
+                        for loc, e in order_validation:
+                            self.logger.warn(f"❌ At {loc if loc else '<root>'}: {e}")
+                        self.call_dtc_force_latch(self.invalid_order_dtc)
+                        return
+                    self.logger.info("✅ Valid VDA5050 order message")
+                    vda_order_msg = VDAOrder(**generate_vda_order_msg(msg_json))
+                    self._order_pub.publish(msg=vda_order_msg)
+                if msg.topic.endswith("instantActions"):
+                    instant_actions_validation = validate_vda5050_payload(
+                        "instantActions", json.loads(msg.payload)
+                    )
+                    if instant_actions_validation:
+                        self.logger.warn(f"❌ Invalid VDA5050 instantActions message")
+                        for loc, e in instant_actions_validation:
+                            self.logger.warn(f"❌ At {loc if loc else '<root>'}: {e}")
+                        self.call_dtc_force_latch(self.invalid_order_dtc)
+                        return
+                    self.logger.info("✅ Valid VDA5050 instantActions message")
+                    vda_instant_actions_message = VDAInstantActions(
+                        **generate_vda_instant_action_msg(msg_json)
+                    )
+                    self._instant_actions_pub.publish(msg=vda_instant_actions_message)
+            except KeyError as ex:
+                self.logger.warn(f"Ignoring invalid VDA5050 message: {ex}.")
+                return
+        else:
+            try:
+                if msg.topic.endswith("order"):
+                    vda_order_msg = VDAOrder(**generate_vda_order_msg(msg_json))
+                    self._order_pub.publish(msg=vda_order_msg)
+                if msg.topic.endswith("instantActions"):
+                    vda_instant_actions_message = VDAInstantActions(
+                        **generate_vda_instant_action_msg(msg_json)
+                    )
+                    self._instant_actions_pub.publish(msg=vda_instant_actions_message)
+            except KeyError as ex:
+                self.logger.warn(f"Ignoring invalid VDA5050 message: {ex}.")
+                return
+
 
     def on_disconnect_mqtt(self, client, userdata, rc):
         """MQTT client disconnect callback."""

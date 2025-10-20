@@ -38,7 +38,12 @@ from rclpy.node import Node
 from rcl_interfaces.msg import ParameterDescriptor
 from rcl_interfaces.msg import ParameterType
 from rosidl_runtime_py import message_to_ordereddict
-
+# JLG_CHANGES_START
+import jsonschema
+import os
+import uuid
+from ament_index_python.packages import get_package_share_directory
+# JLG_CHANGES_STOP
 
 def get_vda5050_ts():
     """
@@ -312,3 +317,72 @@ def get_vda5050_ros2_topic(
     return (
         f"/{mqtt_topic}"
     )
+
+# JLG_CHANGES_START
+def validate_vda5050_payload(type: str, order: dict) -> list[tuple[str, str]]:
+    """
+    Validate the order structure against the VDA5050 schema.
+
+    Args:
+        type (str): Type of the payload, e.g. "order" or "instantActions".
+        order (dict): The order to validate.
+
+    Returns:
+        list[tuple[str, str]]: A list of tuples containing the location and error message
+        for each validation error.
+    """
+    schema_file = "order.schema" if type == "order" else "instantActions.schema"
+    with open(
+        os.path.join(
+            get_package_share_directory("vda5050_connector"),
+            "config",
+            "json_schemas",
+            schema_file,
+        )
+    ) as f:
+        schema = json.load(f)
+
+    validator = jsonschema.Draft202012Validator(
+        schema, format_checker=jsonschema.FormatChecker()
+    )
+    errors = sorted(validator.iter_errors(order), key=lambda e: e.path)
+
+    err_list = []
+    for e in errors:
+        loc = list(e.path)
+        err_list.append((loc, e.message))
+
+    return err_list
+
+
+def is_uuid(value: str) -> bool:
+    """Return True if string is a valid UUID."""
+    try:
+        uuid.UUID(value)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+def collect_uuids(data):
+    """Recursively collect UUID values from a dict/list."""
+    found = []
+
+    if isinstance(data, dict):
+        for value in data.values():
+            found.extend(collect_uuids(value))
+
+    elif isinstance(data, list):
+        for item in data:
+            found.extend(collect_uuids(item))
+
+    elif isinstance(data, str) and is_uuid(data):
+        found.append(data)
+
+    return found
+
+
+def has_unique_uuids(payload) -> bool:
+    uuids = collect_uuids(payload)
+    return len(uuids) == len(set(uuids))
+# JLG_CHANGES_STOP

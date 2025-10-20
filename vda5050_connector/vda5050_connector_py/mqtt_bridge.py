@@ -41,14 +41,29 @@ import os
 import time
 
 # ROS dependencies / utils
+# JLG_CHANGES_START
+import rclpy
+# JLG_CHANGES_STOP
 from rclpy.node import Node
+
+# JLG_CHANGES_START
+from talos_msgs.srv import DTCUnlatch
+from talos_msgs.msg import DTC
+# JLG_CHANGES_STOP
 
 from vda5050_connector_py.utils import get_vda5050_mqtt_topic
 from vda5050_connector_py.utils import get_vda5050_ros2_topic
 from vda5050_connector_py.utils import json_camel_to_snake_case
 from vda5050_connector_py.utils import read_str_parameter, read_int_parameter
+# JLG_CHANGES_START
+from vda5050_connector_py.utils import read_bool_parameter
+# JLG_CHANGES_STOP
 from vda5050_connector_py.utils import convert_ros_message_to_json
 from vda5050_connector_py.utils import get_vda5050_ts
+# JLG_CHANGES_START
+from vda5050_connector_py.utils import has_unique_uuids
+from vda5050_connector_py.utils import validate_vda5050_payload
+# JLG_CHANGES_STOP
 
 from vda5050_connector_py.vda5050_controller import (
     DEFAULT_PROTOCOL_VERSION,
@@ -252,6 +267,10 @@ class MQTTBridge(Node):
         self._serial_number = read_str_parameter(self, "serial_number", "robot_1")
 
         self._interface_name = read_str_parameter(self, "interface_name", "uagv")
+        # JLG_CHANGES_START
+        self.enable_vda5050_validation = read_bool_parameter(self, "enable_vda5050_validation", True)
+        self.invalid_order_dtc = read_int_parameter(self, "invalid_order_dtc", 2460)
+        # JLG_CHANGES_STOP
 
         self.configure()
 
@@ -313,6 +332,16 @@ class MQTTBridge(Node):
 
         self.on_configure()
 
+        # JLG_CHANGES_START
+        # Create DTC latching/unlatching services
+        self.dtc_unlatch_client = self.create_client(
+            DTCUnlatch, "diagnostics/unlatch_dtc"
+        )
+        self.dtc_force_latch_client = self.create_client(
+            DTCUnlatch, "diagnostics/force_latch_dtc"
+        )
+        # JLG_CHANGES_STOP
+
         self.logger.info(f"Node {NODE_NAME} has started successfully.")
 
     def on_connect_mqtt(self, client, userdata, flags, rc):
@@ -353,25 +382,78 @@ class MQTTBridge(Node):
 
     def on_message_mqtt(self, client, userdata, msg):
         """MQTT client message callback."""
+
+        # JLG_CHANGES_START
+        # First unlatch invalid order DTC
+        if self.enable_vda5050_validation:
+            self.call_dtc_unlatch(self.invalid_order_dtc)
+        # JLG_CHANGES_STOP
+
         try:
             msg_json = json_camel_to_snake_case(msg.payload)
             self.logger.debug(f"Received '{msg_json}' from '{msg.topic}' topic")
         except json.decoder.JSONDecodeError:
             self.logger.error(f"Failed to decode message: '{msg.payload}'")
+            # JLG_CHANGES_START
+            self.call_dtc_force_latch(self.invalid_order_dtc)
+            # JLG_CHANGES_STOP
             return
 
-        try:
-            if msg.topic.endswith("order"):
-                vda_order_msg = VDAOrder(**generate_vda_order_msg(msg_json))
-                self._order_pub.publish(msg=vda_order_msg)
-            if msg.topic.endswith("instantActions"):
-                vda_instant_actions_message = VDAInstantActions(
-                    **generate_vda_instant_action_msg(msg_json)
-                )
-                self._instant_actions_pub.publish(msg=vda_instant_actions_message)
-        except KeyError as ex:
-            self.logger.warn(f"Ignoring invalid VDA5050 message: {ex}.")
-            return
+        # JLG_CHANGES_START
+        if self.enable_vda5050_validation:
+            # Check uuid uniqueness
+            if has_unique_uuids(msg_json) is False:
+                self.logger.warn(f"❌ Invalid VDA5050 message: duplicated UUIDs found")
+                self.call_dtc_force_latch(self.invalid_order_dtc)
+                return
+
+            try:
+                if msg.topic.endswith("order"):
+                    order_validation = validate_vda5050_payload(
+                        "order", json.loads(msg.payload)
+                    )
+                    if order_validation:
+                        self.logger.warn(f"❌ Invalid VDA5050 order message")
+                        for loc, e in order_validation:
+                            self.logger.warn(f"❌ At {loc if loc else '<root>'}: {e}")
+                        self.call_dtc_force_latch(self.invalid_order_dtc)
+                        return
+                    self.logger.info("✅ Valid VDA5050 order message")
+                    vda_order_msg = VDAOrder(**generate_vda_order_msg(msg_json))
+                    self._order_pub.publish(msg=vda_order_msg)
+                if msg.topic.endswith("instantActions"):
+                    instant_actions_validation = validate_vda5050_payload(
+                        "instantActions", json.loads(msg.payload)
+                    )
+                    if instant_actions_validation:
+                        self.logger.warn(f"❌ Invalid VDA5050 instantActions message")
+                        for loc, e in instant_actions_validation:
+                            self.logger.warn(f"❌ At {loc if loc else '<root>'}: {e}")
+                        self.call_dtc_force_latch(self.invalid_order_dtc)
+                        return
+                    self.logger.info("✅ Valid VDA5050 instantActions message")
+                    vda_instant_actions_message = VDAInstantActions(
+                        **generate_vda_instant_action_msg(msg_json)
+                    )
+                    self._instant_actions_pub.publish(msg=vda_instant_actions_message)
+            except KeyError as ex:
+                self.logger.warn(f"Ignoring invalid VDA5050 message: {ex}.")
+                return
+        # JLG_CHANGES_STOP
+        else:
+            try:
+                if msg.topic.endswith("order"):
+                    vda_order_msg = VDAOrder(**generate_vda_order_msg(msg_json))
+                    self._order_pub.publish(msg=vda_order_msg)
+                if msg.topic.endswith("instantActions"):
+                    vda_instant_actions_message = VDAInstantActions(
+                        **generate_vda_instant_action_msg(msg_json)
+                    )
+                    self._instant_actions_pub.publish(msg=vda_instant_actions_message)
+            except KeyError as ex:
+                self.logger.warn(f"Ignoring invalid VDA5050 message: {ex}.")
+                return
+
 
     def on_disconnect_mqtt(self, client, userdata, rc):
         """MQTT client disconnect callback."""
@@ -576,3 +658,77 @@ class MQTTBridge(Node):
             interface_name=self._interface_name
         )
         self._publish_to_topic(msg, topic)
+
+    # JLG_CHANGES_START
+    def call_dtc_unlatch(self, dtc: int):
+        """
+        Call the DTC unlatch service.
+
+        Args:
+            dtc: DTC number to unlatch
+
+        Returns:
+            bool: Success status of the service call
+        """
+        if not self.dtc_unlatch_client.service_is_ready():
+            self.logger.error("DTC unlatch service not available")
+            return False
+
+        request = DTCUnlatch.Request()
+        dtc_msg = DTC()
+        dtc_msg.dtc = dtc
+        request.dtc = dtc_msg
+
+        try:
+            future = self.dtc_unlatch_client.call_async(request)
+            # We make it synchronous here
+            rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
+            if future.done():
+                response = future.result()
+                self.logger.info(f"DTC unlatch service call result: {response.success}")
+                return response.success
+            else:
+                self.logger.error("DTC unlatch service call timed out")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"DTC unlatch service call failed: {e}")
+            return False
+
+    def call_dtc_force_latch(self, dtc: int):
+        """
+        Call the DTC force latch service.
+
+        Args:
+            dtc_data: DTC message data to send
+
+        Returns:
+            bool: Success status of the service call
+        """
+        if not self.dtc_force_latch_client.service_is_ready():
+            self.logger.error("DTC force latch service not available")
+            return False
+
+        request = DTCUnlatch.Request()
+        dtc_msg = DTC()
+        dtc_msg.dtc = dtc
+        request.dtc = dtc_msg
+
+        try:
+            future = self.dtc_force_latch_client.call_async(request)
+            # We make it synchronous here
+            rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
+            if future.done():
+                response = future.result()
+                self.logger.info(
+                    f"DTC force latch service call result: {response.success}"
+                )
+                return response.success
+            else:
+                self.logger.error("DTC force latch service call timed out")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"DTC force latch service call failed: {e}")
+            return False
+    # JLG_CHANGES_STOP

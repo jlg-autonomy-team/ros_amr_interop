@@ -34,12 +34,12 @@
 from datetime import datetime
 import re
 import json
-import jsonschema
 from rclpy.node import Node
 from rcl_interfaces.msg import ParameterDescriptor
 from rcl_interfaces.msg import ParameterType
 from rosidl_runtime_py import message_to_ordereddict
 # JLG_CHANGES_START
+import jsonschema
 import os
 import uuid
 from ament_index_python.packages import get_package_share_directory

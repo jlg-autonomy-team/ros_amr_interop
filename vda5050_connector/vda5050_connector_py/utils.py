@@ -32,19 +32,18 @@
 # Various common utility functions.
 
 from datetime import datetime
-import os
 import re
 import json
 import jsonschema
-# JLG_CHANGES_START
-import uuid
-# JLG_CHANGES_STOP
-from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
 from rcl_interfaces.msg import ParameterDescriptor
 from rcl_interfaces.msg import ParameterType
 from rosidl_runtime_py import message_to_ordereddict
-
+# JLG_CHANGES_START
+import os
+import uuid
+from ament_index_python.packages import get_package_share_directory
+# JLG_CHANGES_STOP
 
 def get_vda5050_ts():
     """

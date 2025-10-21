@@ -8,3 +8,4 @@ int32 active_personality
 uint32[] acu_dtcs
 uint32[] gm_dtcs
 string acu_software_version
+string gm_software_version

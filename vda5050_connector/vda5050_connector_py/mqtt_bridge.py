@@ -270,6 +270,9 @@ class MQTTBridge(Node):
         # JLG_CHANGES_START
         self.enable_vda5050_validation = read_bool_parameter(self, "enable_vda5050_validation", True)
         self.invalid_order_dtc = read_int_parameter(self, "invalid_order_dtc", 2460)
+        self.broker_comm_loss_dtc = read_int_parameter(
+            self, "broker_comm_loss_dtc", 2456
+        )
         # JLG_CHANGES_STOP
 
         self.configure()
@@ -324,14 +327,6 @@ class MQTTBridge(Node):
         # Keep a copy of the last VDA5050 Connection message
         self._last_connection_msg = None
 
-        # Connect to MQTT broker
-        self.mqtt_client.connect_async(
-            host=self.mqtt_address, port=int(self.mqtt_port), keepalive=30
-        )
-        self.mqtt_client.loop_start()
-
-        self.on_configure()
-
         # JLG_CHANGES_START
         # Create DTC latching/unlatching services
         self.dtc_unlatch_client = self.create_client(
@@ -341,6 +336,14 @@ class MQTTBridge(Node):
             DTCUnlatch, "diagnostics/force_latch_dtc"
         )
         # JLG_CHANGES_STOP
+
+        # Connect to MQTT broker
+        self.mqtt_client.connect_async(
+            host=self.mqtt_address, port=int(self.mqtt_port), keepalive=30
+        )
+        self.mqtt_client.loop_start()
+
+        self.on_configure()
 
         self.logger.info(f"Node {NODE_NAME} has started successfully.")
 
@@ -376,9 +379,14 @@ class MQTTBridge(Node):
                     connection_state=VDAConnection.ONLINE,
                 )
             )
-
+            # JLG_CHANGES_START
+            self.call_dtc_unlatch(self.broker_comm_loss_dtc)
+            # JLG_CHANGES_STOP
         else:
             self.logger.error("Failed to connect, return code %d\n", rc)
+            # JLG_CHANGES_START
+            self.call_dtc_force_latch(self.broker_comm_loss_dtc)
+            # JLG_CHANGES_STOP
 
     def on_message_mqtt(self, client, userdata, msg):
         """MQTT client message callback."""
@@ -476,6 +484,9 @@ class MQTTBridge(Node):
                 time.sleep(1)
         else:
             self.logger.info("Disconnected from MQTT Broker!")
+        # JLG_CHANGES_START
+        self.call_dtc_force_latch(self.broker_comm_loss_dtc)
+        # JLG_CHANGES_STOP
 
     def on_configure(self):
         """
@@ -731,4 +742,5 @@ class MQTTBridge(Node):
         except Exception as e:
             self.logger.error(f"DTC force latch service call failed: {e}")
             return False
+
     # JLG_CHANGES_STOP

@@ -1,5 +1,6 @@
 uint8 amr_type
 uint32 amr_serial_number
+int8 last_autonomy_calibration
 uint8 operating_mode
 uint8 scissor_height
 uint8 paired_status

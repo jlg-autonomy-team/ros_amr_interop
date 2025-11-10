@@ -88,6 +88,12 @@ from vda5050_connector.srv import SupportedActions
 from vda5050_connector.action import NavigateToNode
 from vda5050_connector.action import ProcessVDAAction
 
+# JLG_CHANGES_START
+from vda5050_msgs.msg import AGVPosition as VDAAGVPosition
+from vda5050_msgs.msg import NodePosition as VDANodePosition
+from vda5050_connector.action import NavigateThroughNodes
+# JLG_CHANGES_END
+
 # Constants
 DEFAULT_NODE_NAME = "controller"
 DEFAULT_NAMESPACE = "vda5050"
@@ -103,6 +109,9 @@ DEFAULT_GET_STATE_SVC_NAME = "adapter/get_state"
 DEFAULT_SUPPORTED_ACTIONS_SVC_NAME = "adapter/supported_actions"
 DEFAULT_VDA_ACTION_ACT_NAME = "adapter/vda_action"
 DEFAULT_NAV_TO_NODE_ACT_NAME = "adapter/nav_to_node"
+# JLG_CHANGES_START
+DEFAULT_NAV_THROUGH_NODES_ACT_NAME = "adapter/nav_through_nodes"
+# JLG_CHANGES_END
 
 DEFAULT_STATE_PUB_PERIOD = 5.0  # sec
 DEFAULT_CONNECTION_PUB_PERIOD = 15.0  # sec
@@ -167,6 +176,11 @@ class VDA5050Controller(Node):
         self._active_block = False
         self._retry_current_goal = False
         self._navigation_error = False
+        self._running_edges = []
+        self._running_nodes = []
+        self._unexecuted_nodes = []
+        self._unexecuted_edges = []
+        self._only_take_next_node = False
         # JLG_CHANGES_END
 
         self._cancel_action = None
@@ -270,6 +284,20 @@ class VDA5050Controller(Node):
                 "NavigateToNode adapter action server not available, waiting again..."
             )
         self._navigate_to_node_goal_handle = None
+
+        # JLG_CHANGES_START
+        # Action client for sending NavigateThroughNodes goals to adapter
+        self._navigate_through_nodes_act_cli = ActionClient(
+            node=self,
+            action_type=NavigateThroughNodes,
+            action_name=base_interface_name + DEFAULT_NAV_THROUGH_NODES_ACT_NAME,
+        )
+        while not self._navigate_through_nodes_act_cli.wait_for_server(timeout_sec=1.0):
+            self.logger.error(
+                "NavigateThroughNodes adapter action server not available, waiting again..."
+            )
+        self._navigate_through_nodes_goal_handle = None
+        # JLG_CHANGES_END
 
         # Action client for sending ProcessVDAAction goals to adapter
         self._process_vda_action_act_cli = ActionClient(
@@ -1237,6 +1265,11 @@ class VDA5050Controller(Node):
 
             self._current_order = order
 
+            # JLG_CHANGES_START
+            self._unexecuted_nodes = self._current_order.nodes.copy()
+            self._unexecuted_edges = self._current_order.edges.copy()
+            # JLG_CHANGES_END
+
         # Remove previous order errors when accepting a new order
         errors = [
             error
@@ -1489,7 +1522,8 @@ class VDA5050Controller(Node):
             return
 
         if not self._is_navigation_active():
-            self._process_next_edge()
+            self._process_goal_list()
+            # self._process_next_edge()
 
     def _process_node(self, node: VDANode):
         """
@@ -1513,6 +1547,13 @@ class VDA5050Controller(Node):
                 "last_node_sequence_id": node.sequence_id,
             }
         )
+
+        # JLG_CHANGES_START
+        # remove node from unexecuted list
+        self._unexecuted_nodes = [
+            n for n in self._unexecuted_nodes if n.sequence_id != node.sequence_id
+        ]
+        # JLG_CHANGES_END
 
         self._current_node_actions = node.actions
         self.logger.info(
@@ -1554,6 +1595,13 @@ class VDA5050Controller(Node):
             "soft": get_list_type(VDAAction.SOFT),
             "none": get_list_type(VDAAction.NONE),
         }
+
+        # JLG_CHANGES_START
+        self._only_take_next_node = (self._only_take_next_node 
+                                     or any(a.action_type == "precisionLocation"
+                                            for actions in execution_list.values()
+                                            for a in actions))
+        # JLG_CHANGES_END
 
         # Execute serial (hard) actions
         if len(execution_list["hard"]) > 0:
@@ -1604,6 +1652,7 @@ class VDA5050Controller(Node):
             self.send_adapter_navigate_to_node(edge=next_edge, node=next_node)
         else:
             self.logger.error(f"{next_node} Already current goal")
+
     # ---- Navigate to node: send goals ----
 
     def send_adapter_navigate_to_node(self, edge: VDAEdge, node: VDANode):
@@ -1791,7 +1840,294 @@ class VDA5050Controller(Node):
             True if robot is navigating to node, False otherwise.
 
         """
-        return self._navigate_to_node_goal_handle is not None
+        # JLG_CHANGES_START
+        return self._navigate_to_node_goal_handle is not None or self._navigate_through_nodes_goal_handle is not None
+        # JLG_CHANGES_END
+
+# JLG_CHANGES_START
+    # ---- Navigate through nodes: send goals ----
+
+    def _process_goal_list(self):
+        """
+        Split nodes into groups based on released status and actions present.
+
+        Group all released nodes together until the first node with actions. The first node with actions
+        also included in this group. The edges are grouped accordingly.
+
+        If _only_take_next_node is True, only the first released edge and node are taken. This is set if the previous node
+        had a precisionLocation action to preserve backwards compatibility.
+
+        """
+        if self._only_take_next_node:
+            # only get the first next node
+            self._running_edges[:] = [self._unexecuted_edges[0]] if self._unexecuted_edges[0].released else []
+            self._running_nodes[:] = [self._unexecuted_nodes[0]] if self._unexecuted_nodes[0].released else []
+        else:
+            self._running_edges[:] = list(itertools.takewhile(lambda e: e.released, self._unexecuted_edges))
+            self._running_nodes.clear()
+
+            # take all released nodes until the first one with actions
+            # take the first node with actions too
+            for node in self._unexecuted_nodes:
+                if not node.released:
+                    break
+                self._running_nodes.append(node)
+                if node.actions:
+                    break
+
+        self._only_take_next_node = False
+
+        min_len = min(len(self._running_edges), len(self._running_nodes))
+        self._running_edges = self._running_edges[:min_len]
+        self._running_nodes = self._running_nodes[:min_len]
+
+        if min_len > 0:
+            self.send_adapter_navigate_through_nodes(self._running_edges, self._running_nodes)
+        else:
+            self.logger.error("No released edges/nodes to process.")
+
+    def _is_point_in_radius(self, point: VDAAGVPosition, center: VDANodePosition, radius: float) -> bool:
+        """
+        Check if a point is inside a radius.
+
+        Args:
+        ----
+            point (VDAAGVPosition): Point to check.
+            center (VDANodePosition): Circle center.
+            radius (float): Circle radius (m).
+
+        Returns
+        -------
+            True if point is inside circle, False otherwise.
+
+        """
+        distance_squared = (point.x - center.x) ** 2 + (point.y - center.y) ** 2
+        return distance_squared <= radius ** 2
+    
+    def _pop_traversed_nodes(self, node: VDANode, edge: VDAEdge):
+        """
+        Remove nodes that have been reached based on current position.
+
+        Args:
+        ----
+            node (VDANode): Current node.
+            edge (VDAEdge): Current edge.
+        """
+        self._update_state(
+            {
+                "edge_states": [
+                    edge_state
+                    for edge_state in self._current_state.edge_states
+                    if edge_state.edge_id != edge.edge_id
+                    and edge_state.sequence_id != edge.sequence_id
+                ],
+                "node_states": [
+                    node_state
+                    for node_state in self._current_state.node_states
+                    if node_state.node_id != node.node_id
+                ],
+                "last_node_id": node.node_id,
+                "last_node_sequence_id": node.sequence_id,
+            }
+        )
+
+        self._running_edges = [e for e in self._running_edges if e.edge_id != edge.edge_id]
+        self._running_nodes = [n for n in self._running_nodes if n.node_id != node.node_id]
+        self._unexecuted_edges = [e for e in self._unexecuted_edges if e.edge_id != edge.edge_id]
+        self._unexecuted_nodes = [n for n in self._unexecuted_nodes if n.node_id != node.node_id]   
+
+    def _navigate_through_nodes_feedback_callback(self, feedback_msg):
+        """
+        Process feedback from navigate through nodes action.
+
+        Args:
+        ----
+            feedback_msg: Feedback message from action server.
+
+        """
+        # guard against empty lists
+        # keep the last node until navigation has stopped
+        if len(self._running_nodes) <= 1 or len(self._running_edges) <= 1:
+            return
+
+        # remove nodes that have been reached
+        if self._is_point_in_radius(feedback_msg.feedback.position, self._running_nodes[0].node_position, 0.5):
+            self.logger.info(f"Reached node: {self._running_nodes[0].node_id}")
+            self._pop_traversed_nodes(self._running_nodes[0], self._running_edges[0])
+
+    def send_adapter_navigate_through_nodes(self, edges: VDAEdge, nodes: VDANode):
+        """
+        Send navigation goal to the VDA5050 adapter.
+
+        Args:
+        ----
+            edges (VDAEdge): Order's edges to traverse.
+            nodes (VDANode): Order nodes.
+
+        """
+        # Create goal message with edge and node parameters
+        goal_msg = NavigateThroughNodes.Goal()
+        goal_msg.edges = edges
+        goal_msg.nodes = nodes
+
+        # Wait for NavigateThroughNodes action server to be ready
+        self._navigate_through_nodes_act_cli.wait_for_server()
+
+        # Send goal to action server
+        self.logger.info(f"Navigate through nodes goal request sent. nodes: {len(nodes)} edges: {len(edges)}")
+        self._current_node_goal = nodes[-1]
+        _send_goal_future = self._navigate_through_nodes_act_cli.send_goal_async(
+            goal_msg,
+            feedback_callback=self._navigate_through_nodes_feedback_callback
+        )
+
+        # Register callback to be executed when the goal is accepted
+        _send_goal_future.add_done_callback(
+            self._navigate_through_nodes_goal_response_callback
+        )
+
+    def _navigate_through_nodes_goal_response_callback(self, future: Future):
+        """
+        Response callback function for navigate through nodes goal request.
+
+        Args:
+        ----
+            future (Future): Action response future.
+
+        """
+        self._navigate_through_nodes_goal_handle = future.result()
+        if not self._navigate_through_nodes_goal_handle.accepted:
+            self.logger.error(
+                "Navigate through nodes goal request rejected by adapter. Trying again."
+            )
+
+            # Notify master of the failure
+            error = VDAError()
+            error.error_type = OrderRejectErrors.GOAL_REJECTED_ERROR.value
+            error.error_description = "Goal request rejected by adapter."
+            error.error_level = VDAError.WARNING
+            error.error_references = [
+                VDAErrorReference(
+                    reference_key="node_id",
+                    reference_value=self._current_node_goal.node_id,
+                )
+            ]
+
+            self._navigate_through_nodes_goal_handle = None
+            self._current_node_goal = None
+
+            current_errors = self._current_state.errors
+            self._update_state({"errors": current_errors + [error]}, publish_now=True)
+
+            self._kill_order()
+            return
+
+        self.logger.info("Navigate through nodes goal request accepted by adapter.")
+
+        # Add callback to handle action result
+        _get_result_future = self._navigate_through_nodes_goal_handle.get_result_async()
+        _get_result_future.add_done_callback(
+            self._navigate_through_nodes_result_callback
+        )
+
+    def _navigate_through_nodes_result_callback(self, future: Future):
+        """
+        Process VDA actions goal request.
+
+        This callback is in charge of triggering next order's node execution.
+
+        Args:
+        ----
+            future (Future): Action result future.
+
+        """
+        self._navigate_through_nodes_goal_handle = None
+
+        # check result
+        result = future.result().result
+        if result.error:
+            self.logger.error(f"Failed to reach goal. Error: {result.error_code}")
+            self._set_navigation_error(True)
+
+            # Notify master of the failure
+            error = VDAError()
+            error.error_type = OrderExecutionErrors.NAVIGATION_ERROR.value
+            error.error_description = f"Error code: {result.error_code}"
+            error.error_level = VDAError.WARNING
+            error.error_references = [
+                VDAErrorReference(
+                    reference_key="node_id",
+                    reference_value=self._current_node_goal.node_id,
+                )
+            ]
+
+            current_errors = self._current_state.errors
+            self._update_state({"errors": current_errors + [error]}, publish_now=True)
+            return
+
+        # When the order is cancelled, this callback should avoid continuing its logic
+        if self._canceling_order():
+            return
+
+        # Check if goal failed
+        status = future.result().status
+        if status == GoalStatus.STATUS_ABORTED:
+            self.logger.info("Failed to reach goal. Order aborted.")
+
+            # Notify master of the failure
+            error = VDAError()
+            error.error_type = OrderRejectErrors.NO_ROUTE_ERROR.value
+            error.error_description = "Failed to reach current node."
+            # JLG_CHANGES_START
+            # this is not a FATAL error so change to WARNING
+            error.error_level = VDAError.WARNING
+            # JLG_CHANGES_END
+            error.error_references = [
+                VDAErrorReference(
+                    reference_key="node_id",
+                    reference_value=self._current_node_goal.node_id,
+                )
+            ]
+
+            current_errors = self._current_state.errors
+            self._update_state({"errors": current_errors + [error]}, publish_now=True)
+
+            return
+
+        if self._has_active_pause():
+            # Retry _SHOULD_ always be set if a startPause action is received
+            # but this will handle the case if the action has a blocking type of NONE
+            self._set_retry_current_node(True)
+            return
+
+        if self._has_active_block() or self._retry_current_node():
+            # I would have liked to set retry here but for quick finishing actions
+            # the active block is released before this callback has time to run
+            # so retry is set on the action receive
+            return
+
+        if (len(self._running_edges) == 0 or len(self._running_nodes) == 0):
+            self.logger.error("No current edges or nodes to process after navigation.")
+            return
+
+        # pop the last edge and node
+        last_edge = self._running_edges[-1]     
+        last_node = self._running_nodes[-1]
+        self._update_state(
+            {
+                "edge_states": [
+                    edge_state
+                    for edge_state in self._current_state.edge_states
+                    if edge_state.edge_id != last_edge.edge_id
+                    and edge_state.sequence_id != last_edge.sequence_id
+                ]
+            }
+        )
+        self._unexecuted_edges = [edge for edge in self._unexecuted_edges if edge not in self._running_edges]
+
+        self._process_node(node=last_node)
+
+# JLG_CHANGES_END
 
     # Factsheet
 

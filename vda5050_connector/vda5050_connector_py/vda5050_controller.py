@@ -1408,7 +1408,12 @@ class VDA5050Controller(Node):
 
         # Interrupt any running navigation goal
         if self._is_navigation_active():
-            self._navigate_to_node_goal_handle.cancel_goal_async()
+            # JLG_CHANGES_START
+            if self._navigate_to_node_goal_handle is not None:
+                self._navigate_to_node_goal_handle.cancel_goal_async()
+            if self._navigate_through_nodes_goal_handle is not None:
+                self._navigate_through_nodes_goal_handle.cancel_goal_async()
+            # JLG_CHANGES_END
             return
 
         # Once all the VDA actions and navigation goal requests have finished,
@@ -1451,7 +1456,10 @@ class VDA5050Controller(Node):
 
         # Interrupt any running navigation goal
         if self._is_navigation_active():
-            self._navigate_to_node_goal_handle.cancel_goal_async()
+            if self._navigate_to_node_goal_handle is not None:
+                self._navigate_to_node_goal_handle.cancel_goal_async()
+            if self._navigate_through_nodes_goal_handle is not None:
+                self._navigate_through_nodes_goal_handle.cancel_goal_async()
             return
 
         # Clear Navigation error after cancelling all actions and goals``
@@ -2095,15 +2103,9 @@ class VDA5050Controller(Node):
             return
 
         if self._has_active_pause():
-            # Retry _SHOULD_ always be set if a startPause action is received
-            # but this will handle the case if the action has a blocking type of NONE
-            self._set_retry_current_node(True)
             return
 
-        if self._has_active_block() or self._retry_current_node():
-            # I would have liked to set retry here but for quick finishing actions
-            # the active block is released before this callback has time to run
-            # so retry is set on the action receive
+        if self._has_active_block():
             return
 
         if (len(self._running_edges) == 0 or len(self._running_nodes) == 0):

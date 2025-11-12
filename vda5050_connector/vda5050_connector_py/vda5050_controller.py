@@ -1260,6 +1260,11 @@ class VDA5050Controller(Node):
             self._current_order.nodes = base_order_nodes + order.nodes
             self._current_order.edges = base_order_edges + order.edges
 
+            # JLG_CHANGES_START
+            # avoid copying the stitching node
+            self._unexecuted_nodes = self._unexecuted_nodes + [node for node in order.nodes[1:] if node.released]
+            self._unexecuted_edges = self._unexecuted_edges + [edge for edge in order.edges if edge.released]
+            # JLG_CHANGES_END
         else:
             # Accept NEW / UPDATE order
             if mode == OrderAcceptModes.NEW:
@@ -1269,8 +1274,8 @@ class VDA5050Controller(Node):
             self._current_order = order
 
             # JLG_CHANGES_START
-            self._unexecuted_nodes = self._current_order.nodes.copy()
-            self._unexecuted_edges = self._current_order.edges.copy()
+            self._unexecuted_nodes = [node for node in self._current_order.nodes if node.released]
+            self._unexecuted_edges = [edge for edge in self._current_order.edges if edge.released]
             # JLG_CHANGES_END
 
         # Remove previous order errors when accepting a new order
@@ -1871,8 +1876,8 @@ class VDA5050Controller(Node):
         """
         if self._only_take_next_node:
             # only get the first next node
-            self._running_edges[:] = [self._unexecuted_edges[0]] if self._unexecuted_edges[0].released else []
-            self._running_nodes[:] = [self._unexecuted_nodes[0]] if self._unexecuted_nodes[0].released else []
+            self._running_edges[:] = self._unexecuted_edges[0]
+            self._running_nodes[:] = self._unexecuted_nodes[0]
         else:
             self._running_edges[:] = list(itertools.takewhile(lambda e: e.released, self._unexecuted_edges))
             self._running_nodes.clear()
@@ -1880,8 +1885,6 @@ class VDA5050Controller(Node):
             # take all released nodes until the first one with actions
             # take the first node with actions too
             for node in self._unexecuted_nodes:
-                if not node.released:
-                    break
                 self._running_nodes.append(node)
                 if node.actions:
                     break
@@ -1895,7 +1898,25 @@ class VDA5050Controller(Node):
         if min_len > 0:
             self.send_adapter_navigate_through_nodes(self._running_edges, self._running_nodes)
         else:
-            self.logger.error("No released edges/nodes to process.")
+            # Get next edge to be processed by looking for an edge
+            # with sequence_id equal to last_node_sequence_id + 1.
+            try:
+                next_edge = next(
+                    edge
+                    for edge in self._current_order.edges
+                    if edge.sequence_id == self._current_state.last_node_sequence_id + 1
+                )
+            except StopIteration:
+                # This only happens when there is no order or it has finished,
+                # but there is an active instant action running.
+                # In this case, just exit.
+                return
+
+            if not next_edge.released:
+                if not self._current_state.new_base_request:
+                    self.logger.warn("Next edge is part of the horizon. Stopping traversing of nodes.")
+                    self._update_state({"new_base_request": True}, publish_now=True)
+                return
 
     def _is_point_in_radius(self, point: VDAAGVPosition, center: VDANodePosition, radius: float) -> bool:
         """

@@ -1538,8 +1538,8 @@ class VDA5050Controller(Node):
             return
 
         if not self._is_navigation_active():
-            self._process_goal_list()
-            # self._process_next_edge()
+            # self._process_goal_list()
+            self._process_next_edge()
 
     def _process_node(self, node: VDANode):
         """

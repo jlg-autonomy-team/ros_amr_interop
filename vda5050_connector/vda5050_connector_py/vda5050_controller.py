@@ -1445,9 +1445,6 @@ class VDA5050Controller(Node):
         delete edge_states and node_states, and set to failed waiting action_states.
         """
 
-        # Set cancelOrder action state to running
-        # self._update_action_status(self._cancel_action.action_id, VDACurrentAction.RUNNING)
-
         # Set waiting actions to failed
         for action_state in self._current_state.action_states:
             if action_state.action_status == VDACurrentAction.WAITING:
@@ -1464,10 +1461,12 @@ class VDA5050Controller(Node):
 
         # Interrupt any running navigation goal
         if self._is_navigation_active():
+            # JLG_CHANGES_START
             if self._navigate_to_node_goal_handle is not None:
                 self._navigate_to_node_goal_handle.cancel_goal_async()
             if self._navigate_through_nodes_goal_handle is not None:
                 self._navigate_through_nodes_goal_handle.cancel_goal_async()
+            # JLG_CHANGES_END
             return
 
         # Clear Navigation error after cancelling all actions and goals``
@@ -1668,7 +1667,6 @@ class VDA5050Controller(Node):
             self.send_adapter_navigate_to_node(edge=next_edge, node=next_node)
         else:
             self.logger.error(f"{next_node} Already current goal")
-
     # ---- Navigate to node: send goals ----
 
     def send_adapter_navigate_to_node(self, edge: VDAEdge, node: VDANode):

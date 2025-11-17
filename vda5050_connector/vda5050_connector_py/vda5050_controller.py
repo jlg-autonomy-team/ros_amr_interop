@@ -1917,7 +1917,7 @@ class VDA5050Controller(Node):
 
             if not next_edge.released:
                 if not self._current_state.new_base_request:
-                    self.logger.warn("Next edge is part of the horizon. Stopping traversing of nodes.")
+                    self.logger.warning("Next edge is part of the horizon. Stopping traversing of nodes.")
                     self._update_state({"new_base_request": True}, publish_now=True)
                 return
 
@@ -1929,7 +1929,7 @@ class VDA5050Controller(Node):
         ----
             point (VDAAGVPosition): Point to check.
             center (VDANodePosition): Circle center.
-            radius (float): Circle radius (m).
+            radius_squared (float): Circle radius squared (m^2).
 
         Returns
         -------

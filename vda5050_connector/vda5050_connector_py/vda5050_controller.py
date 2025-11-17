@@ -1874,8 +1874,8 @@ class VDA5050Controller(Node):
         """
         if self._only_take_next_node:
             # only get the first next node
-            self._running_edges[:] = self._unexecuted_edges[0]
-            self._running_nodes[:] = self._unexecuted_nodes[0]
+            self._running_edges[:] = [self._unexecuted_edges[0]]
+            self._running_nodes[:] = [self._unexecuted_nodes[0]]
         else:
             self._running_edges[:] = list(itertools.takewhile(lambda e: e.released, self._unexecuted_edges))
             self._running_nodes.clear()

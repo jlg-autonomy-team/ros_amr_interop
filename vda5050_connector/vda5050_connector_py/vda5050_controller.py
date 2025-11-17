@@ -266,6 +266,7 @@ class VDA5050Controller(Node):
         self._interface_name = read_str_parameter(self, "interface_name", DEFAULT_INTERFACE_NAME)
 
         # JLG_CHANGES_START
+        self._enable_navigate_through_nodes = read_bool_parameter(self, "enable_navigate_through_nodes", False)
         self._node_arrived_radius = read_double_parameter(self, "node_arrived_radius", 0.5)
         self._node_arrived_radius_squared = self._node_arrived_radius ** 2
         # JLG_CHANGES_END
@@ -296,10 +297,11 @@ class VDA5050Controller(Node):
             action_type=NavigateThroughNodes,
             action_name=base_interface_name + DEFAULT_NAV_THROUGH_NODES_ACT_NAME,
         )
-        while not self._navigate_through_nodes_act_cli.wait_for_server(timeout_sec=1.0):
-            self.logger.error(
-                "NavigateThroughNodes adapter action server not available, waiting again..."
-            )
+        if self._enable_navigate_through_nodes:
+            while not self._navigate_through_nodes_act_cli.wait_for_server(timeout_sec=1.0):
+                self.logger.error(
+                    "NavigateThroughNodes adapter action server not available, waiting again..."
+                )
         self._navigate_through_nodes_goal_handle = None
         # JLG_CHANGES_END
 
@@ -1538,8 +1540,10 @@ class VDA5050Controller(Node):
             return
 
         if not self._is_navigation_active():
-            # self._process_goal_list()
-            self._process_next_edge()
+            if self._enable_navigate_through_nodes:
+                self._process_goal_list()
+            else:
+                self._process_next_edge()
 
     def _process_node(self, node: VDANode):
         """

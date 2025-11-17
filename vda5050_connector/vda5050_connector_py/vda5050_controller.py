@@ -267,6 +267,7 @@ class VDA5050Controller(Node):
 
         # JLG_CHANGES_START
         self._node_arrived_radius = read_double_parameter(self, "node_arrived_radius", 0.5)
+        self._node_arrived_radius_squared = self._node_arrived_radius ** 2
         # JLG_CHANGES_END
 
     # ---- Configure ROS interfaces ----
@@ -1916,7 +1917,7 @@ class VDA5050Controller(Node):
                     self._update_state({"new_base_request": True}, publish_now=True)
                 return
 
-    def _is_point_in_radius(self, point: VDAAGVPosition, center: VDANodePosition, radius: float) -> bool:
+    def _is_point_in_radius(self, point: VDAAGVPosition, center: VDANodePosition, radius_squared: float) -> bool:
         """
         Check if a point is inside a radius.
 
@@ -1932,7 +1933,7 @@ class VDA5050Controller(Node):
 
         """
         distance_squared = (point.x - center.x) ** 2 + (point.y - center.y) ** 2
-        return distance_squared <= radius ** 2
+        return distance_squared <= radius_squared
     
     def _pop_traversed_nodes(self, node: VDANode, edge: VDAEdge):
         """
@@ -1981,7 +1982,7 @@ class VDA5050Controller(Node):
             return
 
         # remove nodes that have been reached
-        if self._is_point_in_radius(feedback_msg.feedback.position, self._running_nodes[0].node_position, self._node_arrived_radius):
+        if self._is_point_in_radius(feedback_msg.feedback.position, self._running_nodes[0].node_position, self._node_arrived_radius_squared):
             self.logger.info(f"Reached node: {self._running_nodes[0].node_id}")
             self._pop_traversed_nodes(self._running_nodes[0], self._running_edges[0])
 

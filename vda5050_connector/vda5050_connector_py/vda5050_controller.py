@@ -1985,14 +1985,14 @@ class VDA5050Controller(Node):
             self.logger.info(f"Reached node: {self._running_nodes[0].node_id}")
             self._pop_traversed_nodes(self._running_nodes[0], self._running_edges[0])
 
-    def send_adapter_navigate_through_nodes(self, edges: VDAEdge, nodes: VDANode):
+    def send_adapter_navigate_through_nodes(self, edges: list[VDAEdge], nodes: list[VDANode]):
         """
         Send navigation goal to the VDA5050 adapter.
 
         Args:
         ----
-            edges (VDAEdge): Order's edges to traverse.
-            nodes (VDANode): Order nodes.
+            edges (list[VDAEdge]): Order's edges to traverse.
+            nodes (list[VDANode]): Order nodes.
 
         """
         # Create goal message with edge and node parameters

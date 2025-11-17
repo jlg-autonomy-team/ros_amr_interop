@@ -1973,7 +1973,7 @@ class VDA5050Controller(Node):
 
     def _navigate_through_nodes_feedback_callback(self, feedback_msg):
         """
-        Process feedback from navigate through nodes action.
+        Feedback callback function for navigate through nodes goal request.
 
         Args:
         ----
@@ -2067,13 +2067,11 @@ class VDA5050Controller(Node):
 
     def _navigate_through_nodes_result_callback(self, future: Future):
         """
-        Process VDA actions goal request.
-
-        This callback is in charge of triggering next order's node execution.
+        Result callback function for navigate through nodes goal request.
 
         Args:
         ----
-            future (Future): Action result future.
+            future (Future): Action response future.
 
         """
         self._navigate_through_nodes_goal_handle = None

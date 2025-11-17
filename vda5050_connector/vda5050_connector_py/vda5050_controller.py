@@ -2135,7 +2135,7 @@ class VDA5050Controller(Node):
             return
 
         # pop the last edge and node
-        last_edge = self._running_edges[-1]     
+        last_edge = self._running_edges[-1]
         last_node = self._running_nodes[-1]
         self._update_state(
             {

@@ -146,13 +146,17 @@ def generate_vda_order_msg(order):
 
         if "trajectory" in edge:
             edge["trajectory"] = VDATrajectory(
-                degree=float(edge["trajectory"]["degree"]),
+                # JLG_CHANGES_START
+                degree=int(edge["trajectory"]["degree"]),
+                # JLG_CHANGES_END
                 knot_vector=edge["trajectory"]["knot_vector"],
                 control_points=[
                     VDAControlPoint(
                         x=float(cp["x"]),
                         y=float(cp["y"]),
-                        orientation=float(cp["orientation"]),
+                        # JLG_CHANGES_START
+                        # orientation=float(cp["orientation"]),
+                        # JLG_CHANGES_END
                         weight=float(cp.get("weight", 1)),
                     )
                     for cp in edge["trajectory"]["control_points"]

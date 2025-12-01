@@ -119,6 +119,7 @@ def generate_vda_order_msg(order):
         node["actions"] = [VDAAction(**action) for action in node["actions"]]
 
     vda_order["nodes"] = [VDANode(**node) for node in vda_order["nodes"]]
+    # self.logger.info()
     for edge in vda_order["edges"]:
         for action in edge["actions"]:
             if "action_parameters" in action:
@@ -146,13 +147,15 @@ def generate_vda_order_msg(order):
 
         if "trajectory" in edge:
             edge["trajectory"] = VDATrajectory(
-                degree=float(edge["trajectory"]["degree"]),
+                degree=edge["trajectory"]["degree"],
                 knot_vector=edge["trajectory"]["knot_vector"],
                 control_points=[
                     VDAControlPoint(
                         x=float(cp["x"]),
                         y=float(cp["y"]),
-                        orientation=float(cp["orientation"]),
+                        # JLG_CHANGES_START
+                        # orientation=float(cp["orientation"]),
+                        # JLG_CHANGES_END
                         weight=float(cp.get("weight", 1)),
                     )
                     for cp in edge["trajectory"]["control_points"]
@@ -451,7 +454,9 @@ class MQTTBridge(Node):
         else:
             try:
                 if msg.topic.endswith("order"):
+                    self.logger.info("HERE1")
                     vda_order_msg = VDAOrder(**generate_vda_order_msg(msg_json))
+                    self.logger.info("HERE2")
                     self._order_pub.publish(msg=vda_order_msg)
                 if msg.topic.endswith("instantActions"):
                     vda_instant_actions_message = VDAInstantActions(

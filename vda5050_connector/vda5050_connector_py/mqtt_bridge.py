@@ -342,9 +342,16 @@ class MQTTBridge(Node):
         # JLG_CHANGES_STOP
 
         # Connect to MQTT broker
-        self.mqtt_client.connect_async(
-            host=self.mqtt_address, port=int(self.mqtt_port), keepalive=30
+        self.mqtt_client = mqtt_client.Client(
+            mqtt_client.CallbackAPIVersion.VERSION2
         )
+
+        # self.mqtt_client.enable_logger()
+        self.mqtt_client.reconnect_delay_set(1, 30)
+        self.mqtt_client.max_inflight_messages_set(20)
+        self.mqtt_client.max_queued_messages_set(100)
+
+        self.mqtt_client.connect_async(host=self.mqtt_address, port=int(self.mqtt_port), keepalive=60)
         self.mqtt_client.loop_start()
 
         self.on_configure()

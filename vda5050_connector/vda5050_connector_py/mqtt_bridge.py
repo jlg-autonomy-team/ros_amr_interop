@@ -358,7 +358,9 @@ class MQTTBridge(Node):
 
         self.logger.info(f"Node {NODE_NAME} has started successfully.")
 
+    # JLG_CHANGES_START
     def on_connect_mqtt(self, client, userdata, flags, rc, properties=None): 
+    # JLG_CHANGES_STOP
         """MQTT client connect callback."""
         if rc == 0:
             self.logger.info("Connected to MQTT Broker!")
@@ -473,15 +475,18 @@ class MQTTBridge(Node):
                 self.logger.warn(f"Ignoring invalid VDA5050 message: {ex}.")
                 return
 
-
+    # JLG_CHANGES_START
     def on_disconnect_mqtt(self, client, userdata, disconnect_flags, rc, properties=None):
+    # JLG_CHANGES_STOP
         """MQTT client disconnect callback."""
         if rc != 0:
+            # JLG_CHANGES_START
             self.logger.info(
                 f"MQTT client disconnected "
                 f"(rc: {rc}, {error_string(rc)}, flags: {disconnect_flags}). "
                 "Trying to reconnect."
             )
+            # JLG_CHANGES_STOP
             while not self.mqtt_client.is_connected():
                 try:
                     try:

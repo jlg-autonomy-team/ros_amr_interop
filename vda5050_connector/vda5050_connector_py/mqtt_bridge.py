@@ -283,7 +283,9 @@ class MQTTBridge(Node):
 
     def configure(self):
         # Configure MQTT
-        self.mqtt_client = mqtt_client.Client()
+        # JLG_CHANGES_START
+        self.mqtt_client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION2)
+        # JLG_CHANGES_STOP
         self.mqtt_client.on_connect = self.on_connect_mqtt
         self.mqtt_client.on_message = self.on_message_mqtt
         self.mqtt_client.on_disconnect = self.on_disconnect_mqtt
@@ -342,16 +344,23 @@ class MQTTBridge(Node):
         # JLG_CHANGES_STOP
 
         # Connect to MQTT broker
-        self.mqtt_client.connect_async(
-            host=self.mqtt_address, port=int(self.mqtt_port), keepalive=30
-        )
+        # JLG_CHANGES_START
+        # self.mqtt_client.enable_logger()
+        self.mqtt_client.reconnect_delay_set(1, 30)
+        self.mqtt_client.max_inflight_messages_set(20)
+        self.mqtt_client.max_queued_messages_set(100)
+
+        self.mqtt_client.connect_async(host=self.mqtt_address, port=int(self.mqtt_port), keepalive=60)
+        # JLG_CHANGES_START
         self.mqtt_client.loop_start()
 
         self.on_configure()
 
         self.logger.info(f"Node {NODE_NAME} has started successfully.")
 
-    def on_connect_mqtt(self, client, userdata, flags, rc):
+    # JLG_CHANGES_START
+    def on_connect_mqtt(self, client, userdata, flags, rc, properties=None): 
+    # JLG_CHANGES_STOP
         """MQTT client connect callback."""
         if rc == 0:
             self.logger.info("Connected to MQTT Broker!")
@@ -466,13 +475,18 @@ class MQTTBridge(Node):
                 self.logger.warn(f"Ignoring invalid VDA5050 message: {ex}.")
                 return
 
-
-    def on_disconnect_mqtt(self, client, userdata, rc):
+    # JLG_CHANGES_START
+    def on_disconnect_mqtt(self, client, userdata, disconnect_flags, rc, properties=None):
+    # JLG_CHANGES_STOP
         """MQTT client disconnect callback."""
         if rc != 0:
+            # JLG_CHANGES_START
             self.logger.info(
-                f"MQTT client disconnected (rc: {rc}, {error_string(rc)}). Trying to reconnect."
+                f"MQTT client disconnected "
+                f"(rc: {rc}, {error_string(rc)}, flags: {disconnect_flags}). "
+                "Trying to reconnect."
             )
+            # JLG_CHANGES_STOP
             while not self.mqtt_client.is_connected():
                 try:
                     try:

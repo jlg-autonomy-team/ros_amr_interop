@@ -470,11 +470,13 @@ class MQTTBridge(Node):
                 return
 
 
-    def on_disconnect_mqtt(self, client, userdata, rc, properties=None):
+    def on_disconnect_mqtt(self, client, userdata, disconnect_flags, rc, properties=None):
         """MQTT client disconnect callback."""
         if rc != 0:
             self.logger.info(
-                f"MQTT client disconnected (rc: {rc}, {error_string(rc)}). Trying to reconnect."
+                f"MQTT client disconnected "
+                f"(rc: {rc}, {error_string(rc)}, flags: {disconnect_flags}). "
+                "Trying to reconnect."
             )
             while not self.mqtt_client.is_connected():
                 try:

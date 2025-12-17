@@ -283,10 +283,12 @@ class MQTTBridge(Node):
 
     def configure(self):
         # Configure MQTT
+        # JLG_CHANGES_START
         self.mqtt_client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION2)
-        self.mqtt_client.on_connect = self.on_connect_mqtt # VERSION2 needs an extra parameter
+        # JLG_CHANGES_STOP
+        self.mqtt_client.on_connect = self.on_connect_mqtt
         self.mqtt_client.on_message = self.on_message_mqtt
-        self.mqtt_client.on_disconnect = self.on_disconnect_mqtt # VERSION2 needs an extra parameter
+        self.mqtt_client.on_disconnect = self.on_disconnect_mqtt
 
         # Enable TLS if username is provided
         if self.mqtt_username:
@@ -342,19 +344,21 @@ class MQTTBridge(Node):
         # JLG_CHANGES_STOP
 
         # Connect to MQTT broker
+        # JLG_CHANGES_START
         # self.mqtt_client.enable_logger()
         self.mqtt_client.reconnect_delay_set(1, 30)
         self.mqtt_client.max_inflight_messages_set(20)
         self.mqtt_client.max_queued_messages_set(100)
 
         self.mqtt_client.connect_async(host=self.mqtt_address, port=int(self.mqtt_port), keepalive=60)
+        # JLG_CHANGES_START
         self.mqtt_client.loop_start()
 
         self.on_configure()
 
         self.logger.info(f"Node {NODE_NAME} has started successfully.")
 
-    def on_connect_mqtt(self, client, userdata, flags, rc, properties=None):
+    def on_connect_mqtt(self, client, userdata, flags, rc, properties=None): 
         """MQTT client connect callback."""
         if rc == 0:
             self.logger.info("Connected to MQTT Broker!")

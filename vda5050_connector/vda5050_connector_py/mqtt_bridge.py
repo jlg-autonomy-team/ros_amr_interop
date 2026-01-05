@@ -739,7 +739,7 @@ class MQTTBridge(Node):
         except Exception as e:
             self.logger.error(f"Failed to send DTC force latch request: {e}")
 
-    def _log_future(self, future, label):
+    def _log_future(self, future, label: str) -> None:
         try:
             resp = future.result()
             self.logger.info(f"{label} result: {resp.success}")

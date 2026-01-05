@@ -346,7 +346,7 @@ class MQTTBridge(Node):
         # Connect to MQTT broker
         # JLG_CHANGES_START
         # self.mqtt_client.enable_logger()
-        self.mqtt_client.reconnect_delay_set(1, 30)
+        self.mqtt_client.reconnect_delay_set(min_delay=1, max_delay=30)
         self.mqtt_client.max_inflight_messages_set(20)
         self.mqtt_client.max_queued_messages_set(100)
 
@@ -487,19 +487,19 @@ class MQTTBridge(Node):
                 "Trying to reconnect."
             )
             # JLG_CHANGES_STOP
-            while not self.mqtt_client.is_connected():
-                try:
-                    try:
-                        self.mqtt_client.loop_stop()
-                        self.mqtt_client.disconnect()
-                    except Exception:
-                        pass
-                    self.logger.info("Reconfiguring mqtt bridge client object...")
-                    self.configure()
-                    # self.mqtt_client.reconnect()
-                except OSError:
-                    pass
-                time.sleep(1)
+            # while not self.mqtt_client.is_connected():
+            #     try:
+            #         try:
+            #             self.mqtt_client.loop_stop()
+            #             self.mqtt_client.disconnect()
+            #         except Exception:
+            #             pass
+            #         self.logger.info("Reconfiguring mqtt bridge client object...")
+            #         self.configure()
+            #         # self.mqtt_client.reconnect()
+            #     except OSError:
+            #         pass
+            #     time.sleep(1)
         else:
             self.logger.info("Disconnected from MQTT Broker!")
         # JLG_CHANGES_START
@@ -689,7 +689,7 @@ class MQTTBridge(Node):
         self._publish_to_topic(msg, topic)
 
     # JLG_CHANGES_START
-    def call_dtc_unlatch(self, dtc: int):
+    def call_dtc_unlatch(self, dtc: int) -> None:
         """
         Call the DTC unlatch service.
 
@@ -701,7 +701,7 @@ class MQTTBridge(Node):
         """
         if not self.dtc_unlatch_client.service_is_ready():
             self.logger.error("DTC unlatch service not available")
-            return False
+            return
 
         request = DTCUnlatch.Request()
         dtc_msg = DTC()
@@ -710,21 +710,11 @@ class MQTTBridge(Node):
 
         try:
             future = self.dtc_unlatch_client.call_async(request)
-            # We make it synchronous here
-            rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
-            if future.done():
-                response = future.result()
-                self.logger.info(f"DTC unlatch service call result: {response.success}")
-                return response.success
-            else:
-                self.logger.error("DTC unlatch service call timed out")
-                return False
-
+            future.add_done_callback(lambda f: self._log_future(f, "DTC unlatch"))
         except Exception as e:
-            self.logger.error(f"DTC unlatch service call failed: {e}")
-            return False
+            self.logger.error(f"Failed to send DTC unlatch request: {e}")
 
-    def call_dtc_force_latch(self, dtc: int):
+    def call_dtc_force_latch(self, dtc: int) -> None:
         """
         Call the DTC force latch service.
 
@@ -736,7 +726,7 @@ class MQTTBridge(Node):
         """
         if not self.dtc_force_latch_client.service_is_ready():
             self.logger.error("DTC force latch service not available")
-            return False
+            return
 
         request = DTCUnlatch.Request()
         dtc_msg = DTC()
@@ -745,20 +735,15 @@ class MQTTBridge(Node):
 
         try:
             future = self.dtc_force_latch_client.call_async(request)
-            # We make it synchronous here
-            rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
-            if future.done():
-                response = future.result()
-                self.logger.info(
-                    f"DTC force latch service call result: {response.success}"
-                )
-                return response.success
-            else:
-                self.logger.error("DTC force latch service call timed out")
-                return False
-
+            future.add_done_callback(lambda f: self._log_future(f, "DTC force latch"))
         except Exception as e:
-            self.logger.error(f"DTC force latch service call failed: {e}")
-            return False
+            self.logger.error(f"Failed to send DTC force latch request: {e}")
+
+    def _log_future(self, future, label: str) -> None:
+        try:
+            resp = future.result()
+            self.logger.info(f"{label} result: {resp.success}")
+        except Exception as e:
+            self.logger.error(f"{label} failed: {e}")
 
     # JLG_CHANGES_STOP

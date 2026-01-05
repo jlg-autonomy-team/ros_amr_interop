@@ -1560,10 +1560,12 @@ class VDA5050Controller(Node):
             return
 
         if not self._is_navigation_active():
+            # JLG_CHANGES_START
             if self._enable_navigate_through_nodes:
                 self._process_goal_list()
             else:
                 self._process_next_edge()
+            # JLG_CHANGES_END
 
     def _process_node(self, node: VDANode):
         """

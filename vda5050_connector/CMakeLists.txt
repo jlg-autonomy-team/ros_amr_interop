@@ -37,7 +37,9 @@ find_package(vda5050_msgs REQUIRED)
 # BUILD
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+# JLG_CHANGES_START
   "action/NavigateThroughNodes.action"
+# JLG_CHANGES_END
   "action/NavigateToNode.action"
   "action/ProcessVDAAction.action"
   "srv/GetState.srv"
@@ -104,7 +106,7 @@ install(
   DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../VDA5050/json_schemas
   DESTINATION share/${PROJECT_NAME}/config/
 )
-# JLG_CHANGES_STOP
+# JLG_CHANGES_END
 
 # TEST
 

@@ -38,18 +38,20 @@ import copy
 import json
 import ssl
 import os
+# JLG_CHANGES_START
 import time
+# JLG_CHANGES_END
 
 # ROS dependencies / utils
 # JLG_CHANGES_START
 import rclpy
-# JLG_CHANGES_STOP
+# JLG_CHANGES_END
 from rclpy.node import Node
 
 # JLG_CHANGES_START
 from talos_msgs.srv import DTCUnlatch
 from talos_msgs.msg import DTC
-# JLG_CHANGES_STOP
+# JLG_CHANGES_END
 
 from vda5050_connector_py.utils import get_vda5050_mqtt_topic
 from vda5050_connector_py.utils import get_vda5050_ros2_topic
@@ -57,18 +59,15 @@ from vda5050_connector_py.utils import json_camel_to_snake_case
 from vda5050_connector_py.utils import read_str_parameter, read_int_parameter
 # JLG_CHANGES_START
 from vda5050_connector_py.utils import read_bool_parameter
-# JLG_CHANGES_STOP
+# JLG_CHANGES_END
 from vda5050_connector_py.utils import convert_ros_message_to_json
 from vda5050_connector_py.utils import get_vda5050_ts
 # JLG_CHANGES_START
 from vda5050_connector_py.utils import has_unique_uuids
 from vda5050_connector_py.utils import validate_vda5050_payload
-# JLG_CHANGES_STOP
+# JLG_CHANGES_END
 
-from vda5050_connector_py.vda5050_controller import (
-    DEFAULT_PROTOCOL_VERSION,
-    SUPPORTED_PROTOCOL_VERSIONS,
-)
+from vda5050_connector_py.vda5050_controller import DEFAULT_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS
 
 # ROS msgs / srvs / actions
 from vda5050_msgs.msg import Action as VDAAction
@@ -244,7 +243,6 @@ def generate_vda5050_topic_alias(vda_version):
             f"but got {vda_version}"
         )
 
-
 class MQTTBridge(Node):
     """Translates VDA5050 MQTT messages from and to ROS2."""
 
@@ -260,9 +258,7 @@ class MQTTBridge(Node):
         self.mqtt_username = read_str_parameter(self, "mqtt_username", "")
         self.mqtt_password = read_str_parameter(self, "mqtt_password", "")
 
-        self.vda5050_version = read_str_parameter(
-            self, "vda5050_protocol_version", "2.0.0"
-        )
+        self.vda5050_version = read_str_parameter(self, "vda5050_protocol_version", "2.0.0")
         self.vda5050_version_alias = generate_vda5050_topic_alias(self.vda5050_version)
 
         self._manufacturer_name = read_str_parameter(
@@ -277,7 +273,7 @@ class MQTTBridge(Node):
         self.broker_comm_loss_dtc = read_int_parameter(
             self, "broker_comm_loss_dtc", 2456
         )
-        # JLG_CHANGES_STOP
+        # JLG_CHANGES_END
 
         self.configure()
 
@@ -285,7 +281,7 @@ class MQTTBridge(Node):
         # Configure MQTT
         # JLG_CHANGES_START
         self.mqtt_client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION2)
-        # JLG_CHANGES_STOP
+        # JLG_CHANGES_END
         self.mqtt_client.on_connect = self.on_connect_mqtt
         self.mqtt_client.on_message = self.on_message_mqtt
         self.mqtt_client.on_disconnect = self.on_disconnect_mqtt
@@ -341,7 +337,7 @@ class MQTTBridge(Node):
         self.dtc_force_latch_client = self.create_client(
             DTCUnlatch, "diagnostics/force_latch_dtc"
         )
-        # JLG_CHANGES_STOP
+        # JLG_CHANGES_END
 
         # Connect to MQTT broker
         # JLG_CHANGES_START
@@ -351,7 +347,7 @@ class MQTTBridge(Node):
         self.mqtt_client.max_queued_messages_set(100)
 
         self.mqtt_client.connect_async(host=self.mqtt_address, port=int(self.mqtt_port), keepalive=60)
-        # JLG_CHANGES_START
+        # JLG_CHANGES_END
         self.mqtt_client.loop_start()
 
         self.on_configure()
@@ -360,7 +356,7 @@ class MQTTBridge(Node):
 
     # JLG_CHANGES_START
     def on_connect_mqtt(self, client, userdata, flags, rc, properties=None): 
-    # JLG_CHANGES_STOP
+    # JLG_CHANGES_END
         """MQTT client connect callback."""
         if rc == 0:
             self.logger.info("Connected to MQTT Broker!")
@@ -394,12 +390,12 @@ class MQTTBridge(Node):
             )
             # JLG_CHANGES_START
             self.call_dtc_unlatch(self.broker_comm_loss_dtc)
-            # JLG_CHANGES_STOP
+            # JLG_CHANGES_END
         else:
             self.logger.error("Failed to connect, return code %d\n", rc)
             # JLG_CHANGES_START
             self.call_dtc_force_latch(self.broker_comm_loss_dtc)
-            # JLG_CHANGES_STOP
+            # JLG_CHANGES_END
 
     def on_message_mqtt(self, client, userdata, msg):
         """MQTT client message callback."""
@@ -408,7 +404,7 @@ class MQTTBridge(Node):
         # First unlatch invalid order DTC
         if self.enable_vda5050_validation:
             self.call_dtc_unlatch(self.invalid_order_dtc)
-        # JLG_CHANGES_STOP
+        # JLG_CHANGES_END
 
         try:
             msg_json = json_camel_to_snake_case(msg.payload)
@@ -460,7 +456,7 @@ class MQTTBridge(Node):
             except KeyError as ex:
                 self.logger.warn(f"Ignoring invalid VDA5050 message: {ex}.")
                 return
-        # JLG_CHANGES_STOP
+        # JLG_CHANGES_END
         else:
             try:
                 if msg.topic.endswith("order"):
@@ -477,7 +473,7 @@ class MQTTBridge(Node):
 
     # JLG_CHANGES_START
     def on_disconnect_mqtt(self, client, userdata, disconnect_flags, rc, properties=None):
-    # JLG_CHANGES_STOP
+    # JLG_CHANGES_END
         """MQTT client disconnect callback."""
         if rc != 0:
             # JLG_CHANGES_START
@@ -486,7 +482,8 @@ class MQTTBridge(Node):
                 f"(rc: {rc}, {error_string(rc)}, flags: {disconnect_flags}). "
                 "Trying to reconnect."
             )
-            # JLG_CHANGES_STOP
+            # JLG_CHANGES_END
+			# JLG_CHANGES_START
             # while not self.mqtt_client.is_connected():
             #     try:
             #         try:
@@ -500,11 +497,12 @@ class MQTTBridge(Node):
             #     except OSError:
             #         pass
             #     time.sleep(1)
+			# JLG_CHANGES_END
         else:
             self.logger.info("Disconnected from MQTT Broker!")
         # JLG_CHANGES_START
         self.call_dtc_force_latch(self.broker_comm_loss_dtc)
-        # JLG_CHANGES_STOP
+        # JLG_CHANGES_END
 
     def on_configure(self):
         """
@@ -746,4 +744,4 @@ class MQTTBridge(Node):
         except Exception as e:
             self.logger.error(f"{label} failed: {e}")
 
-    # JLG_CHANGES_STOP
+    # JLG_CHANGES_END

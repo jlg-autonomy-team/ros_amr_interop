@@ -951,7 +951,7 @@ class VDA5050Controller(Node):
                 error_description=current_action.result_description,
                 # JLG_CHANGES_START
                 # this is not a FATAL error so change to WARNING
-                error_level = VDAError.WARNING,
+                error_level=VDAError.WARNING,
                 # JLG_CHANGES_END
                 error_references=[
                     VDAErrorReference(reference_key="action_id", reference_value=current_action.action_id)

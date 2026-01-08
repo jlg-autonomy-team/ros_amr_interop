@@ -604,6 +604,9 @@ class MQTTBridge(Node):
         )
 
         self.mqtt_client.disconnect()
+        # JLG_CHANGES_START
+        self.mqtt_client.loop_stop()
+        # JLG_CHANGES_END
 
     def _publish_to_topic(self, msg, topic):
         """

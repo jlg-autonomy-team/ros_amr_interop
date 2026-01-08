@@ -660,7 +660,9 @@ class VDA5050Controller(Node):
 
         # If found, update action status and result description
         action_state.action_status = action_status
-        if action_status == VDACurrentAction.FINISHED:
+        # JLG_CHANGES_START
+        if action_status == VDACurrentAction.FINISHED or action_status == VDACurrentAction.FAILED:
+        # JLG_CHANGES_END
             action_state.result_description = result_description
 
     # ---- Adapter's state ----

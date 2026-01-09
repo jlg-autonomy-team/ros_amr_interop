@@ -280,7 +280,7 @@ class MQTTBridge(Node):
     def configure(self):
         # Configure MQTT
         # JLG_CHANGES_START
-        self.mqtt_client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION2)
+        self.mqtt_client = mqtt_client.Client(callback_api_version=mqtt_client.CallbackAPIVersion.VERSION2, clean_session=True, reconnect_on_failure=True)
         # JLG_CHANGES_END
         self.mqtt_client.on_connect = self.on_connect_mqtt
         self.mqtt_client.on_message = self.on_message_mqtt
@@ -483,21 +483,14 @@ class MQTTBridge(Node):
                 "Trying to reconnect."
             )
             # JLG_CHANGES_END
-			# JLG_CHANGES_START
-            # while not self.mqtt_client.is_connected():
-            #     try:
-            #         try:
-            #             self.mqtt_client.loop_stop()
-            #             self.mqtt_client.disconnect()
-            #         except Exception:
-            #             pass
-            #         self.logger.info("Reconfiguring mqtt bridge client object...")
-            #         self.configure()
-            #         # self.mqtt_client.reconnect()
-            #     except OSError:
-            #         pass
-            #     time.sleep(1)
-			# JLG_CHANGES_END
+
+            # JLG_CHANGES_START
+            #while not self.mqtt_client.is_connected():
+            #    try:
+            #        self.mqtt_client.reconnect()
+            #    except OSError:
+            #        pass
+            # JLG_CHANGES_END
         else:
             self.logger.info("Disconnected from MQTT Broker!")
         # JLG_CHANGES_START
@@ -611,6 +604,9 @@ class MQTTBridge(Node):
         )
 
         self.mqtt_client.disconnect()
+        # JLG_CHANGES_START
+        self.mqtt_client.loop_stop()
+        # JLG_CHANGES_END
 
     def _publish_to_topic(self, msg, topic):
         """

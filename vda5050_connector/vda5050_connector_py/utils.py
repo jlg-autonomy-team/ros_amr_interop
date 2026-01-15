@@ -313,7 +313,9 @@ def get_vda5050_ros2_topic(
 
     """
     mqtt_topic = get_vda5050_mqtt_topic(
-        manufacturer, serial_number, topic, major_version, interface_name)
+    # JLG_CHANGES_START
+        manufacturer, sanitize_ros_token(token=serial_number, alpha="sn"), topic, major_version, interface_name)
+    # JLG_CHANGES_STOP
     return (
         f"/{mqtt_topic}"
     )
@@ -385,4 +387,22 @@ def collect_uuids(data):
 def has_unique_uuids(payload) -> bool:
     uuids = collect_uuids(payload)
     return len(uuids) == len(set(uuids))
+
+
+def sanitize_ros_token(token: str, alpha: str = "a") -> str:
+    """Convert a string token to a ROS-friendly format.
+    MQTT and ROS have different restrictions on valid topic names and tokens.
+    Args:
+        token (str): The input token.
+        alpha (str): A string to prepend to the token to ensure non-numeric compliance.
+    Returns:
+        str: The ROS-friendly token.
+    """
+    if token[0].isdigit():
+        # ROS does not allow tokens to start with a digit
+        # add a leading string to ensure compliance
+        return alpha + token
+    return token
+
+
 # JLG_CHANGES_STOP

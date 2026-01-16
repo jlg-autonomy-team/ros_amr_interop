@@ -398,7 +398,7 @@ def sanitize_ros_token(token: str, alpha: str = "a") -> str:
     Returns:
         str: The ROS-friendly token.
     """
-    if token[0].isdigit():
+    if token and token[0].isdigit():
         # ROS does not allow tokens to start with a digit
         # add a leading string to ensure compliance
         return alpha + token

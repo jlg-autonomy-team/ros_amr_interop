@@ -364,19 +364,13 @@ def is_uuid(value: str) -> bool:
         return False
 
 def is_valid_action_id(key: str, value: str) -> bool:
-    """Return True if the action IDs has valid strings"""
-
-    if(key != "action_id"):
-        return False
-
-    if isinstance(value, str):
-        return True
+    """Return True if the action ID is a valid string"""
     
-    return False
+    return key == "action_id" and isinstance(value, str)
 
 
 def collect_uuids(data):
-    """Recursively collect UUID values from a dict/list."""
+    """Recursively collect action_id string values from a dict/list."""
     found = []
 
     if isinstance(data, dict):

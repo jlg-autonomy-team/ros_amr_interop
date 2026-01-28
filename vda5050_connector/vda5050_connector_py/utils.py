@@ -364,12 +364,12 @@ def is_uuid(value: str) -> bool:
         return False
 
 def is_valid_action_id(key: str, value: str) -> bool:
-    """Return True if the action ID is a valid string"""
+    """Return True if the action_id is a valid string"""
     
     return key == "action_id" and isinstance(value, str)
 
 
-def collect_uuids(data):
+def collect_action_ids(data):
     """Recursively collect action_id string values from a dict/list."""
     found = []
 
@@ -378,16 +378,15 @@ def collect_uuids(data):
             if is_valid_action_id(key, value):
                 found.append(value)
             else:
-                found.extend(collect_uuids(value))
+                found.extend(collect_action_ids(value))
 
     elif isinstance(data, list):
         for item in data:
-            found.extend(collect_uuids(item))
-
+            found.extend(collect_action_ids(item))
     return found
 
 
-def has_unique_uuids(payload) -> bool:
-    uuids = collect_uuids(payload)
-    return len(uuids) == len(set(uuids))
+def has_unique_action_ids(payload) -> bool:
+    action_ids = collect_action_ids(payload)
+    return len(action_ids) == len(set(action_ids))
 # JLG_CHANGES_STOP

@@ -65,6 +65,7 @@ from vda5050_connector_py.utils import get_vda5050_ts
 # JLG_CHANGES_START
 from vda5050_connector_py.utils import has_unique_uuids
 from vda5050_connector_py.utils import validate_vda5050_payload
+from vda5050_connector_py.utils import collect_uuids
 # JLG_CHANGES_END
 
 from vda5050_connector_py.vda5050_controller import DEFAULT_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS

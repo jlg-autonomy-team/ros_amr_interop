@@ -363,21 +363,35 @@ def is_uuid(value: str) -> bool:
     except (ValueError, TypeError):
         return False
 
+def is_valid_action_id(key: str, value: str) -> bool:
+    """Return True if the action IDs has valid strings"""
+
+    if(key != "action_id"):
+        return False
+
+    if isinstance(value, str):
+        return True
+    
+    return False
+
 
 def collect_uuids(data):
     """Recursively collect UUID values from a dict/list."""
     found = []
 
     if isinstance(data, dict):
-        for value in data.values():
-            found.extend(collect_uuids(value))
+        for key, value in data.items():
+            if is_valid_action_id(key, value):
+                found.append(value)
+            else:
+                found.extend(collect_uuids(value))
 
     elif isinstance(data, list):
         for item in data:
             found.extend(collect_uuids(item))
 
-    elif isinstance(data, str) and is_uuid(data):
-        found.append(data)
+    #elif isinstance(data, str) and is_action_id(data):
+     #   found.append(data)
 
     return found
 

@@ -364,8 +364,7 @@ def is_uuid(value: str) -> bool:
         return False
 
 def is_valid_action_id(key: str, value: str) -> bool:
-    """Return True if the action_id is a valid string"""
-    
+    """Return True if the key-value pair represents an action_id field whose value is a valid string"""
     return key == "action_id" and isinstance(value, str)
 
 

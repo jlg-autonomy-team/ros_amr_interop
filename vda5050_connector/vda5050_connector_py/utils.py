@@ -390,9 +390,6 @@ def collect_uuids(data):
         for item in data:
             found.extend(collect_uuids(item))
 
-    #elif isinstance(data, str) and is_action_id(data):
-     #   found.append(data)
-
     return found
 
 

@@ -363,29 +363,33 @@ def is_uuid(value: str) -> bool:
     except (ValueError, TypeError):
         return False
 
-def is_valid_action_id(key: str, value: str) -> bool:
-    """Return True if the key-value pair represents an action_id field whose value is a valid string"""
-    return key == "action_id" and isinstance(value, str)
 
-
-def collect_action_ids(data):
-    """Recursively collect action_id string values from a dict/list."""
+def collect_ids(data):
+    """Recursively collect all ids from a dict/list."""
     found = []
 
     if isinstance(data, dict):
         for key, value in data.items():
-            if is_valid_action_id(key, value):
-                found.append(value)
+            if (key == "order_id" or key == "node_id" or key == "action_id" or key == "edge_id") and isinstance(value, str):
+                found.append((key, value))
             else:
-                found.extend(collect_action_ids(value))
+                found.extend(collect_ids(value))
 
     elif isinstance(data, list):
         for item in data:
-            found.extend(collect_action_ids(item))
+            found.extend(collect_ids(item))
+
+    #elif isinstance(data, str) and data.strip():
+    #    found.append(data)
+    
     return found
 
 
-def has_unique_action_ids(payload) -> bool:
-    action_ids = collect_action_ids(payload)
-    return len(action_ids) == len(set(action_ids))
+def has_unique_ids(payload) -> bool:
+    """Check if all order_id, node_id, action_id and edge_id values are unique and non-empty."""
+    ids = collect_ids(payload)
+    for _, value in ids:
+        if value.strip() == "":
+            return False
+    return len(ids) == len(set(ids))
 # JLG_CHANGES_STOP

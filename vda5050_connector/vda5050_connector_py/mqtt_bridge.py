@@ -63,7 +63,8 @@ from vda5050_connector_py.utils import read_bool_parameter
 from vda5050_connector_py.utils import convert_ros_message_to_json
 from vda5050_connector_py.utils import get_vda5050_ts
 # JLG_CHANGES_START
-from vda5050_connector_py.utils import has_unique_action_ids
+from vda5050_connector_py.utils import has_unique_ids
+from vda5050_connector_py.utils import collect_ids
 from vda5050_connector_py.utils import validate_vda5050_payload
 # JLG_CHANGES_END
 
@@ -418,9 +419,10 @@ class MQTTBridge(Node):
 
         # JLG_CHANGES_START
         if self.enable_vda5050_validation:
-            # Check action_id uniqueness
-            if has_unique_action_ids(msg_json) is False:
-                self.logger.warn(f"❌ Invalid VDA5050 message: duplicated action_ids found")
+
+            # Check IDs uniqueness
+            if has_unique_ids(msg_json) is False:
+                self.logger.warn(f"❌ Invalid VDA5050 message: duplicate or empty orderID/nodeID/actionID/edgeID found inside the order (IDs must be unique within their respective types).")
                 self.call_dtc_force_latch(self.invalid_order_dtc)
                 return
 

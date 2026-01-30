@@ -370,7 +370,7 @@ def collect_ids(data):
 
     if isinstance(data, dict):
         for key, value in data.items():
-            if (key == "order_id" or key == "node_id" or key == "action_id" or key == "edge_id") and isinstance(value, str):
+            if key in ("order_id", "node_id", "action_id", "edge_id") and isinstance(value, str):
                 found.append((key, value))
             else:
                 found.extend(collect_ids(value))
@@ -378,9 +378,6 @@ def collect_ids(data):
     elif isinstance(data, list):
         for item in data:
             found.extend(collect_ids(item))
-
-    #elif isinstance(data, str) and data.strip():
-    #    found.append(data)
     
     return found
 

@@ -64,7 +64,6 @@ from vda5050_connector_py.utils import convert_ros_message_to_json
 from vda5050_connector_py.utils import get_vda5050_ts
 # JLG_CHANGES_START
 from vda5050_connector_py.utils import has_unique_ids
-from vda5050_connector_py.utils import collect_ids
 from vda5050_connector_py.utils import validate_vda5050_payload
 # JLG_CHANGES_END
 

@@ -364,25 +364,29 @@ def is_uuid(value: str) -> bool:
         return False
 
 
-def collect_uuids(data):
-    """Recursively collect UUID values from a dict/list."""
+def collect_ids(data):
+    """Recursively collect all ids from a dict/list."""
     found = []
 
     if isinstance(data, dict):
-        for value in data.values():
-            found.extend(collect_uuids(value))
+        for key, value in data.items():
+            if key in ("order_id", "node_id", "action_id", "edge_id") and isinstance(value, str):
+                found.append((key, value))
+            else:
+                found.extend(collect_ids(value))
 
     elif isinstance(data, list):
         for item in data:
-            found.extend(collect_uuids(item))
-
-    elif isinstance(data, str) and is_uuid(data):
-        found.append(data)
-
+            found.extend(collect_ids(item))
+    
     return found
 
 
-def has_unique_uuids(payload) -> bool:
-    uuids = collect_uuids(payload)
-    return len(uuids) == len(set(uuids))
+def has_unique_ids(payload) -> bool:
+    """Check if all order_id, node_id, action_id and edge_id values are unique and non-empty."""
+    ids = collect_ids(payload)
+    for _, value in ids:
+        if value.strip() == "":
+            return False
+    return len(ids) == len(set(ids))
 # JLG_CHANGES_STOP

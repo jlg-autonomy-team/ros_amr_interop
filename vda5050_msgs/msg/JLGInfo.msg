@@ -12,3 +12,4 @@ uint32[] gm_dtcs
 string acu_software_version
 string acu_image_version
 string gm_software_version
+string pm_software_version

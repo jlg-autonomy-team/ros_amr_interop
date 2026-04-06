@@ -1913,6 +1913,9 @@ class VDA5050Controller(Node):
         had a precisionLocation action to preserve backwards compatibility.
 
         """
+        # processing a new goal list, reset retry
+        self._set_retry_current_node(False)
+
         if self._only_take_next_node:
             # only get the first next node
             self._running_edges[:] = [self._unexecuted_edges[0]]
@@ -2169,7 +2172,10 @@ class VDA5050Controller(Node):
         if self._has_active_block():
             return
 
-        if (len(self._running_edges) == 0 or len(self._running_nodes) == 0):
+        if self._retry_current_node():
+            return
+
+        if len(self._running_edges) == 0 or len(self._running_nodes) == 0:
             self.logger.error("No current edges or nodes to process after navigation.")
             return
 

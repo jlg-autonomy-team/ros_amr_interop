@@ -1336,9 +1336,13 @@ class VDA5050Controller(Node):
             self._process_node(self._current_order.nodes[0])
         # JLG_CHANGES_START
         else:
-            # On stitching, the stitch node is not re-processed and therefore not removed. 
+            # On stitching, the stitch node is not re-processed and therefore not removed.
             # Remove the stitch node here because it has already been processed.
-            del self._current_state.node_states[0]
+            stitch_sequence_id = order.nodes[0].sequence_id
+            self._current_state.node_states = [
+                ns for ns in self._current_state.node_states
+                if ns.sequence_id != stitch_sequence_id
+            ]
         # JLG_CHANGES_END
 
     def _reject_order(self, order: VDAOrder, error: OrderRejectErrors, description: str = ""):
@@ -1998,7 +2002,7 @@ class VDA5050Controller(Node):
                 "node_states": [
                     node_state
                     for node_state in self._current_state.node_states
-                    if node_state.node_id != node.node_id
+                    if node_state.sequence_id != node.sequence_id
                 ],
                 "last_node_id": node.node_id,
                 "last_node_sequence_id": node.sequence_id,
@@ -2006,9 +2010,9 @@ class VDA5050Controller(Node):
         )
 
         self._running_edges = [e for e in self._running_edges if e.edge_id != edge.edge_id]
-        self._running_nodes = [n for n in self._running_nodes if n.node_id != node.node_id]
+        self._running_nodes = [n for n in self._running_nodes if n.sequence_id != node.sequence_id]
         self._unexecuted_edges = [e for e in self._unexecuted_edges if e.edge_id != edge.edge_id]
-        self._unexecuted_nodes = [n for n in self._unexecuted_nodes if n.node_id != node.node_id]   
+        self._unexecuted_nodes = [n for n in self._unexecuted_nodes if n.sequence_id != node.sequence_id]   
 
     def _navigate_through_nodes_feedback_callback(self, feedback_msg):
         """

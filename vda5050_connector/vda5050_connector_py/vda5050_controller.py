@@ -2012,7 +2012,7 @@ class VDA5050Controller(Node):
         self._running_edges = [e for e in self._running_edges if e.edge_id != edge.edge_id]
         self._running_nodes = [n for n in self._running_nodes if n.sequence_id != node.sequence_id]
         self._unexecuted_edges = [e for e in self._unexecuted_edges if e.edge_id != edge.edge_id]
-        self._unexecuted_nodes = [n for n in self._unexecuted_nodes if n.sequence_id != node.sequence_id]   
+        self._unexecuted_nodes = [n for n in self._unexecuted_nodes if n.sequence_id != node.sequence_id]
 
     def _navigate_through_nodes_feedback_callback(self, feedback_msg):
         """

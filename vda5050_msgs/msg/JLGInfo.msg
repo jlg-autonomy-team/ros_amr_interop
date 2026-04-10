@@ -13,3 +13,7 @@ string acu_software_version
 string acu_image_version
 string gm_software_version
 string pm_software_version
+uint8 front_scanner
+uint8 rear_scanner
+uint8 left_scanner
+uint8 right_scanner

@@ -2117,8 +2117,16 @@ class VDA5050Controller(Node):
             future (Future): Action response future.
 
         """
-        self._navigate_through_nodes_goal_handle = None
+        # Keep goal handle non-None until all state updates are done.
+        # This prevents _is_navigation_active() from returning False while
+        # we're still processing, which would let the _on_active_order timer
+        # race and re-send a goal for the same node.
+        try:
+            self._navigate_through_nodes_result_callback_impl(future)
+        finally:
+            self._navigate_through_nodes_goal_handle = None
 
+    def _navigate_through_nodes_result_callback_impl(self, future: Future):
         # check result
         result = future.result().result
         if result.error:

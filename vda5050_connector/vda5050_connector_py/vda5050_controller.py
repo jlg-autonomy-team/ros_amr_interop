@@ -1062,7 +1062,7 @@ class VDA5050Controller(Node):
         """
         Validate if there is an active order.
 
-        ``actionStates running && nodeStates not empty && edgeStates not empty``
+        ``actionStates running || nodeStates not empty || edgeStates not empty``
 
         Returns
         -------
@@ -1084,13 +1084,13 @@ class VDA5050Controller(Node):
         )
 
         # If there are no actions, but there are node / edge states, there is an active order
-        has_nodes_and_edges = (
-            len(self._current_state.node_states) and len(self._current_state.edge_states)
+        has_nodes_or_edges = (
+            len(self._current_state.node_states) or len(self._current_state.edge_states)
         )
 
-        if has_nodes_and_edges:
+        if has_nodes_or_edges:
             self.logger.debug((
-                "Found nodes and edges while validating if there's an active order."
+                "Found nodes or edges while validating if there's an active order."
                 f" Nodes: {self._current_state.node_states}."
                 f" Edges: {self._current_state.edge_states}."
             ), throttle_duration_sec=5)
@@ -1109,7 +1109,7 @@ class VDA5050Controller(Node):
                 f" Actions: {running_actions}"
             ), throttle_duration_sec=5)
 
-        return has_running_actions or has_nodes_and_edges
+        return has_running_actions or has_nodes_or_edges
 
     def _first_node_in_deviation_range(self, order: VDAOrder) -> bool:
         """

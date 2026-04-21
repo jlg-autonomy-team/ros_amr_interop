@@ -1408,7 +1408,9 @@ class VDA5050Controller(Node):
             self.logger.error(
                 "cancelOrder action request failed. There is no active order running."
             )
-            self._update_action_status(self._cancel_action.action_id, VDACurrentAction.FAILED)
+            # JLG_CHANGES_START
+            self._update_action_status(self._cancel_action.action_id, VDACurrentAction.FAILED, "Request failed. No active order running")
+            # JLG_CHANGES_END
             # The AGV must report a “noOrderToCancel” error with the errorLevel set to warning.
             # The actionId of the instantAction must be passed as an errorReference.
             error = VDAError()

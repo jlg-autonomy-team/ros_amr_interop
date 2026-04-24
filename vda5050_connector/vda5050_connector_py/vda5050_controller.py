@@ -1062,7 +1062,7 @@ class VDA5050Controller(Node):
         """
         Validate if there is an active order.
 
-        ``actionStates running && nodeStates not empty && edgeStates not empty``
+        ``actionStates running || nodeStates not empty || edgeStates not empty``
 
         Returns
         -------
@@ -1084,13 +1084,13 @@ class VDA5050Controller(Node):
         )
 
         # If there are no actions, but there are node / edge states, there is an active order
-        has_nodes_and_edges = (
-            len(self._current_state.node_states) and len(self._current_state.edge_states)
+        has_nodes_or_edges = (
+            len(self._current_state.node_states) or len(self._current_state.edge_states)
         )
 
-        if has_nodes_and_edges:
+        if has_nodes_or_edges:
             self.logger.debug((
-                "Found nodes and edges while validating if there's an active order."
+                "Found nodes or edges while validating if there's an active order."
                 f" Nodes: {self._current_state.node_states}."
                 f" Edges: {self._current_state.edge_states}."
             ), throttle_duration_sec=5)
@@ -1109,7 +1109,7 @@ class VDA5050Controller(Node):
                 f" Actions: {running_actions}"
             ), throttle_duration_sec=5)
 
-        return has_running_actions or has_nodes_and_edges
+        return has_running_actions or has_nodes_or_edges
 
     def _first_node_in_deviation_range(self, order: VDAOrder) -> bool:
         """
@@ -1408,7 +1408,9 @@ class VDA5050Controller(Node):
             self.logger.error(
                 "cancelOrder action request failed. There is no active order running."
             )
-            self._update_action_status(self._cancel_action.action_id, VDACurrentAction.FAILED)
+            # JLG_CHANGES_START
+            self._update_action_status(self._cancel_action.action_id, VDACurrentAction.FAILED, "Request failed. No active order running")
+            # JLG_CHANGES_END
             # The AGV must report a “noOrderToCancel” error with the errorLevel set to warning.
             # The actionId of the instantAction must be passed as an errorReference.
             error = VDAError()
@@ -2117,8 +2119,16 @@ class VDA5050Controller(Node):
             future (Future): Action response future.
 
         """
-        self._navigate_through_nodes_goal_handle = None
+        # Keep goal handle non-None until all state updates are done.
+        # This prevents _is_navigation_active() from returning False while
+        # we're still processing, which would let the _on_active_order timer
+        # race and re-send a goal for the same node.
+        try:
+            self._navigate_through_nodes_result_callback_impl(future)
+        finally:
+            self._navigate_through_nodes_goal_handle = None
 
+    def _navigate_through_nodes_result_callback_impl(self, future: Future):
         # check result
         result = future.result().result
         if result.error:

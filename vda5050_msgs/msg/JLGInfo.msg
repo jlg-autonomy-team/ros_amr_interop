@@ -13,6 +13,8 @@ string acu_software_version
 string acu_image_version
 string gm_software_version
 string pm_software_version
+string front_lidar_firmware_version
+string rear_lidar_firmware_version
 uint8 front_scanner
 uint8 rear_scanner
 uint8 left_scanner

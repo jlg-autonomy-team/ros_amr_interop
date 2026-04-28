@@ -2086,12 +2086,14 @@ class VDA5050Controller(Node):
             error.error_type = OrderRejectErrors.GOAL_REJECTED_ERROR.value
             error.error_description = "Goal request rejected by adapter."
             error.error_level = VDAError.WARNING
-            error.error_references = [
-                VDAErrorReference(
-                    reference_key="node_id",
-                    reference_value=self._current_node_goal.node_id,
-                )
-            ]
+
+            if self._current_node_goal is not None:
+                error.error_references = [
+                    VDAErrorReference(
+                        reference_key="node_id",
+                        reference_value=self._current_node_goal.node_id,
+                    )
+                ]
 
             self._navigate_through_nodes_goal_handle = None
             self._current_node_goal = None
@@ -2140,12 +2142,14 @@ class VDA5050Controller(Node):
             error.error_type = OrderExecutionErrors.NAVIGATION_ERROR.value
             error.error_description = f"Error code: {result.error_code}"
             error.error_level = VDAError.WARNING
-            error.error_references = [
-                VDAErrorReference(
-                    reference_key="node_id",
-                    reference_value=self._current_node_goal.node_id,
-                )
-            ]
+
+            if self._current_node_goal is not None:
+                error.error_references = [
+                    VDAErrorReference(
+                        reference_key="node_id",
+                        reference_value=self._current_node_goal.node_id,
+                    )
+                ]
 
             current_errors = self._current_state.errors
             self._update_state({"errors": current_errors + [error]}, publish_now=True)
@@ -2164,16 +2168,15 @@ class VDA5050Controller(Node):
             error = VDAError()
             error.error_type = OrderRejectErrors.NO_ROUTE_ERROR.value
             error.error_description = "Failed to reach current node."
-            # JLG_CHANGES_START
-            # this is not a FATAL error so change to WARNING
             error.error_level = VDAError.WARNING
-            # JLG_CHANGES_END
-            error.error_references = [
-                VDAErrorReference(
-                    reference_key="node_id",
-                    reference_value=self._current_node_goal.node_id,
-                )
-            ]
+
+            if self._current_node_goal is not None:
+                error.error_references = [
+                    VDAErrorReference(
+                        reference_key="node_id",
+                        reference_value=self._current_node_goal.node_id,
+                    )
+                ]
 
             current_errors = self._current_state.errors
             self._update_state({"errors": current_errors + [error]}, publish_now=True)

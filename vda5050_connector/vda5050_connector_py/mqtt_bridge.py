@@ -330,6 +330,12 @@ class MQTTBridge(Node):
         self._last_connection_msg = None
 
         # JLG_CHANGES_START
+        # Create DTC publisher
+        self.dtc_pub = self.create_publisher(
+            msg_type=DTC,
+            topic="diagnostics/dtc",
+            qos_profile=10,
+        )
         # Create DTC latching/unlatching services
         self.dtc_unlatch_client = self.create_client(
             DTCUnlatch, "diagnostics/unlatch_dtc"
@@ -388,14 +394,8 @@ class MQTTBridge(Node):
                     connection_state=VDAConnection.ONLINE,
                 )
             )
-            # JLG_CHANGES_START
-            self.call_dtc_unlatch(self.broker_comm_loss_dtc)
-            # JLG_CHANGES_END
         else:
             self.logger.error("Failed to connect, return code %d\n", rc)
-            # JLG_CHANGES_START
-            self.call_dtc_force_latch(self.broker_comm_loss_dtc)
-            # JLG_CHANGES_END
 
     def on_message_mqtt(self, client, userdata, msg):
         """MQTT client message callback."""
@@ -494,9 +494,6 @@ class MQTTBridge(Node):
             # JLG_CHANGES_END
         else:
             self.logger.info("Disconnected from MQTT Broker!")
-        # JLG_CHANGES_START
-        self.call_dtc_force_latch(self.broker_comm_loss_dtc)
-        # JLG_CHANGES_END
 
     def on_configure(self):
         """
@@ -621,7 +618,17 @@ class MQTTBridge(Node):
         """
         json_msg = convert_ros_message_to_json(msg)
         self.logger.debug(f"Publishing MQTT message to topic {topic}: {json_msg}")
-        self.mqtt_client.publish(topic, json_msg)
+        # JLG_CHANGES_START
+        result = self.mqtt_client.publish(topic, json_msg)
+        if result.rc != mqtt_client.MQTT_ERR_SUCCESS:
+            err_msg = f"Failed to publish message to topic {topic}: {error_string(result.rc)}"
+            
+            dtc = DTC()
+            dtc.dtc = self.broker_comm_loss_dtc
+            
+            self.logger.error(err_msg)
+            self.dtc_pub.publish(dtc)
+        # JLG_CHANGES_END
 
     def _publish_state(self, msg: VDAOrderState):
         """
@@ -705,7 +712,7 @@ class MQTTBridge(Node):
 
         try:
             future = self.dtc_unlatch_client.call_async(request)
-            future.add_done_callback(lambda f: self._log_future(f, "DTC unlatch"))
+            future.add_done_callback(lambda f: self._log_future(f, f"DTC {dtc} unlatch"))
         except Exception as e:
             self.logger.error(f"Failed to send DTC unlatch request: {e}")
 
@@ -730,14 +737,17 @@ class MQTTBridge(Node):
 
         try:
             future = self.dtc_force_latch_client.call_async(request)
-            future.add_done_callback(lambda f: self._log_future(f, "DTC force latch"))
+            future.add_done_callback(lambda f: self._log_future(f, f"DTC {dtc} force latch"))
         except Exception as e:
             self.logger.error(f"Failed to send DTC force latch request: {e}")
 
     def _log_future(self, future, label: str) -> None:
         try:
             resp = future.result()
-            self.logger.info(f"{label} result: {resp.success}")
+            if resp.success:
+                self.logger.info(f"{label} succeeded")
+            else:
+                self.logger.error(f"{label} failed")
         except Exception as e:
             self.logger.error(f"{label} failed: {e}")
 

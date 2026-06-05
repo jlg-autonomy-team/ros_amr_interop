@@ -874,13 +874,19 @@ class VDA5050Controller(Node):
         """
         _goal_handle = future.result()
         if not _goal_handle.accepted:
+            # JLG_CHANGES_START
             self._update_action_status(
-                action_id=action.action_id, action_status=VDACurrentAction.FAILED
+                action_id=action.action_id,
+                action_status=VDACurrentAction.FAILED,
+                result_description=(
+                    f"Action type '{action.action_type}' is not supported."
+                ),
             )
             self.logger.info(
                 f"VDA Action '{action.action_id}' of type '{action.action_type}'"
-                " rejected by the adapter"
+                " rejected by the adapter. Action type is not supported."
             )
+            # JLG_CHANGES_END
             return
 
         # JLG_CHANGES_START

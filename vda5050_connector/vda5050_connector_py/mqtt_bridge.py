@@ -454,8 +454,11 @@ class MQTTBridge(Node):
                         **generate_vda_instant_action_msg(msg_json)
                     )
                     self._instant_actions_pub.publish(msg=vda_instant_actions_message)
-            except KeyError as ex:
-                self.logger.warn(f"Ignoring invalid VDA5050 message: {ex}.")
+            except Exception as ex:
+                self.logger.warn(
+                    f"Ignoring malformed VDA5050 message: {type(ex).__name__}: {ex}."
+                )
+                self.call_dtc_force_latch(self.invalid_order_dtc)
                 return
         # JLG_CHANGES_END
         else:
@@ -468,9 +471,13 @@ class MQTTBridge(Node):
                         **generate_vda_instant_action_msg(msg_json)
                     )
                     self._instant_actions_pub.publish(msg=vda_instant_actions_message)
-            except KeyError as ex:
-                self.logger.warn(f"Ignoring invalid VDA5050 message: {ex}.")
+            # JLG_CHANGES_START
+            except Exception as ex:
+                self.logger.warn(
+                    f"Ignoring malformed VDA5050 message: {type(ex).__name__}: {ex}."
+                )
                 return
+            # JLG_CHANGES_END
 
     # JLG_CHANGES_START
     def on_disconnect_mqtt(self, client, userdata, disconnect_flags, rc, properties=None):

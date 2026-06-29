@@ -270,6 +270,7 @@ class VDA5050Controller(Node):
         self._enable_navigate_through_nodes = read_bool_parameter(self, "enable_navigate_through_nodes", False)
         self._node_arrived_radius = read_double_parameter(self, "node_arrived_radius", 0.5)
         self._node_arrived_radius_squared = self._node_arrived_radius ** 2
+        self._include_start_node_in_path = read_bool_parameter(self, "include_start_node_in_path", False)
         # JLG_CHANGES_END
 
     # ---- Configure ROS interfaces ----
@@ -2040,6 +2041,29 @@ class VDA5050Controller(Node):
         if self._is_point_in_radius(feedback_msg.feedback.position, self._running_nodes[0].node_position, self._node_arrived_radius_squared):
             self.logger.info(f"Reached node: {self._running_nodes[0].node_id}")
             self._pop_traversed_nodes(self._running_nodes[0], self._running_edges[0])
+            
+    def _get_start_node(self) -> VDANode:
+        """
+        Get the node the robot is currently at (the last reached node).
+
+        The robot is assumed to be at the node whose sequence_id matches the
+        current state's ``last_node_sequence_id``. This node has already been
+        processed (it is no longer tracked in node_states / unexecuted lists)
+        but is still present in ``_current_order.nodes``.
+
+        Returns
+        -------
+            VDANode: The start node if found, None otherwise.
+
+        """
+        return next(
+            (
+                node
+                for node in self._current_order.nodes
+                if node.sequence_id == self._current_state.last_node_sequence_id
+            ),
+            None,
+        )
 
     def send_adapter_navigate_through_nodes(self, edges: list[VDAEdge], nodes: list[VDANode]):
         """
@@ -2053,14 +2077,27 @@ class VDA5050Controller(Node):
         """
         # Create goal message with edge and node parameters
         goal_msg = NavigateThroughNodes.Goal()
+        
+        # Optionally prepend the start node (the node the robot is currently at)
+        # so the adapter can generate a path that begins from it. This only
+        # affects the goal message; the controller's node/edge tracking and the
+        # "robot is at the first node" assumption are left untouched.
+        goal_nodes = nodes
+        if self._include_start_node_in_path:
+            start_node = self._get_start_node()
+            if start_node is not None and (
+                not nodes or nodes[0].sequence_id != start_node.sequence_id
+            ):
+                goal_nodes = [start_node] + list(nodes)
+
         goal_msg.edges = edges
-        goal_msg.nodes = nodes
+        goal_msg.nodes = goal_nodes
 
         # Wait for NavigateThroughNodes action server to be ready
         self._navigate_through_nodes_act_cli.wait_for_server()
 
         # Send goal to action server
-        self.logger.info(f"Navigate through nodes goal request sent. nodes: {len(nodes)} edges: {len(edges)}")
+        self.logger.info(f"Navigate through nodes goal request sent. nodes: {len(goal_nodes)} edges: {len(edges)}")
         self._current_node_goal = nodes[-1]
         _send_goal_future = self._navigate_through_nodes_act_cli.send_goal_async(
             goal_msg,

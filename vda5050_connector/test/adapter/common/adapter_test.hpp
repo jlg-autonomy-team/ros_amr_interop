@@ -50,7 +50,7 @@ public:
   AdapterNodeTest(
     const std::string & node_name, const std::string & ros_namespace,
     const rclcpp::NodeOptions & options)
-  : AdapterNode(node_name, ros_namespace, options){};
+  : AdapterNode(node_name, ros_namespace, options) {};
 
   // Getters of handler reference containers
   std::vector<UniquePtr<StateHandler>> & get_state_handlers() { return state_handlers_; }
@@ -72,7 +72,7 @@ public:
   vda5050_msgs::msg::OrderState get_current_state() const { return current_state_->get(); }
 
   // Execute vda action
-  VDAAction::STATES execute_vda_action(const vda5050_msgs::msg::Action & action)
+  VDAAction::STATES run_vda_action(const vda5050_msgs::msg::Action & action)
   {
     const std::string action_name = action.action_type;
     vda_actions_.at(action_name)->reset(action, nullptr);

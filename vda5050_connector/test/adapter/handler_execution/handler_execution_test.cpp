@@ -51,9 +51,10 @@ TEST_F(AdapterTest, HandlerExecution)
 {
   rclcpp::NodeOptions node_options = rclcpp::NodeOptions();
   std::vector<rclcpp::Parameter> node_parameters;
-  node_parameters.push_back(rclcpp::Parameter(
-    p_state_handler_names,
-    std::vector<std::string>{"test::StubStateHandlerPub", "test::StubStateHandlerData"}));
+  node_parameters.push_back(
+    rclcpp::Parameter(
+      p_state_handler_names,
+      std::vector<std::string>{"test::StubStateHandlerPub", "test::StubStateHandlerData"}));
 
   node_parameters.push_back(
     rclcpp::Parameter(p_vda_action_handlers, std::vector<std::string>{"actionData"}));
@@ -72,18 +73,18 @@ TEST_F(AdapterTest, HandlerExecution)
 
   // Check handlers could modify global current state on configure
   auto order_state = adapter_node->get_current_state();
-// JLG_CHANGES_START
+  // JLG_CHANGES_START
   EXPECT_EQ(static_cast<int>(order_state.information.size()), 1);
-// JLG_CHANGES_END
+  // JLG_CHANGES_END
   EXPECT_FLOAT_EQ(static_cast<int>(order_state.battery_state.battery_charge), 100.0);
 
   // Check handlers could modify global current state on execute
   ASSERT_NO_THROW(adapter_node->call_update_current_state());
   order_state = adapter_node->get_current_state();
   // Update current state should clear previous loads, error and informations
-// JLG_CHANGES_START
+  // JLG_CHANGES_START
   EXPECT_EQ(static_cast<int>(order_state.information.size()), 1);
-// JLG_CHANGES_END
+  // JLG_CHANGES_END
   EXPECT_FLOAT_EQ(static_cast<int>(order_state.battery_state.battery_charge), 90.0);
 
   // Test vda action execute state machine: Transitions and call of state funcs
@@ -99,14 +100,14 @@ TEST_F(AdapterTest, HandlerExecution)
   param_transition.value = "paused";
   action.action_parameters.push_back(param_transition);
 
-  EXPECT_EQ(adapter_node->execute_vda_action(action), VDAAction::STATES::FINISHED);
+  EXPECT_EQ(adapter_node->run_vda_action(action), VDAAction::STATES::FINISHED);
   order_state = adapter_node->get_current_state();
   EXPECT_EQ(order_state.paused, false);
 
   // Test fail case
   action = vda5050_msgs::msg::Action();
   action.action_type = "actionData";
-  EXPECT_EQ(adapter_node->execute_vda_action(action), VDAAction::STATES::FAILED);
+  EXPECT_EQ(adapter_node->run_vda_action(action), VDAAction::STATES::FAILED);
 }
 }  // namespace test
 

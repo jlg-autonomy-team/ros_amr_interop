@@ -121,6 +121,7 @@ DEFAULT_EXECUTE_ORDER_PERIOD = 0.1  # sec
 # JLG_CHANGES_START
 # Maximum number of errors retained in the state. Older errors are dropped to
 # prevent the state message from growing unbounded (e.g. repeated goal rejections).
+# https://jlgaccessit.atlassian.net/browse/S587-2331
 MAX_RETAINED_ERRORS = 25
 # JLG_CHANGES_END
 
@@ -498,6 +499,7 @@ class VDA5050Controller(Node):
         # JLG_CHANGES_START
         # Cap retained errors to the most recent ones to keep the state message
         # from growing unbounded when errors are appended repeatedly.
+        # https://jlgaccessit.atlassian.net/browse/S587-2331
         if "errors" in partial_state and len(self._current_state.errors) > MAX_RETAINED_ERRORS:
             self._current_state.errors = self._current_state.errors[-MAX_RETAINED_ERRORS:]
         # JLG_CHANGES_END

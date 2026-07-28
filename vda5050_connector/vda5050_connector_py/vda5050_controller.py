@@ -455,6 +455,9 @@ class VDA5050Controller(Node):
 
     def _publish_state(self):
         """Publish the current OrderState msg."""
+        # JLG_CHANGES_START
+        self.get_state_from_adapter()
+        # JLG_CHANGES_END
         self.logger.debug(f"Publishing state message {self._current_state}")
         self._current_state.header_id += 1
         self._current_state.timestamp = get_vda5050_ts()

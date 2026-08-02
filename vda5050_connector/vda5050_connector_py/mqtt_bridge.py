@@ -257,6 +257,9 @@ class MQTTBridge(Node):
         self.mqtt_port = read_int_parameter(self, "mqtt_port", 1883)
         self.mqtt_username = read_str_parameter(self, "mqtt_username", "")
         self.mqtt_password = read_str_parameter(self, "mqtt_password", "")
+        # JLG_CHANGES_START
+        self.mqtt_client_id = read_str_parameter(self, "mqtt_client_id", "robot-1")
+        # JLG_CHANGES_END
 
         self.vda5050_version = read_str_parameter(self, "vda5050_protocol_version", "2.0.0")
         self.vda5050_version_alias = generate_vda5050_topic_alias(self.vda5050_version)
@@ -280,7 +283,12 @@ class MQTTBridge(Node):
     def configure(self):
         # Configure MQTT
         # JLG_CHANGES_START
-        self.mqtt_client = mqtt_client.Client(callback_api_version=mqtt_client.CallbackAPIVersion.VERSION2, clean_session=True, reconnect_on_failure=True)
+        self.mqtt_client = mqtt_client.Client(
+            callback_api_version=mqtt_client.CallbackAPIVersion.VERSION2,
+            client_id=self.mqtt_client_id,
+            clean_session=True,
+            reconnect_on_failure=True,
+        )
         # JLG_CHANGES_END
         self.mqtt_client.on_connect = self.on_connect_mqtt
         self.mqtt_client.on_message = self.on_message_mqtt
@@ -293,11 +301,21 @@ class MQTTBridge(Node):
                     key="VDA5050_CONNECTOR_TLS_CA_CERT",
                     default="/etc/ssl/certs/ca-certificates.crt",
                 ),
-                tls_version=ssl.PROTOCOL_TLSv1_2,
+                # JLG_CHANGES_START
+                certfile=os.getenv("VDA5050_CONNECTOR_TLS_CERTFILE"),
+                keyfile=os.getenv("VDA5050_CONNECTOR_TLS_KEYFILE"),
+                # JLG_CHANGES_END
             )
+            # JLG_CHANGES_START
+            # Azure Event Grid requires the CONNECT username to be set to the
+            # client authentication name even when using certificate auth.
+            # The password is only sent for SAS-token auth; for cert auth it
+            # is omitted (username_pw_set with password=None -> u1/p0).
             self.mqtt_client.username_pw_set(
-                username=self.mqtt_username, password=self.mqtt_password
+                username=self.mqtt_username,
+                password=self.mqtt_password if self.mqtt_password else None,
             )
+            # JLG_CHANGES_END
 
         # Configure will message or last testament message
         will_topic = get_vda5050_mqtt_topic(

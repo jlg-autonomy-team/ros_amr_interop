@@ -258,7 +258,7 @@ class MQTTBridge(Node):
         self.mqtt_username = read_str_parameter(self, "mqtt_username", "")
         self.mqtt_password = read_str_parameter(self, "mqtt_password", "")
         # JLG_CHANGES_START
-        self.mqtt_client_id = read_str_parameter(self, "mqtt_client_id", "robot-1")
+        self.mqtt_client_id = read_str_parameter(self, "mqtt_client_id", "")
         # JLG_CHANGES_END
 
         self.vda5050_version = read_str_parameter(self, "vda5050_protocol_version", "2.0.0")

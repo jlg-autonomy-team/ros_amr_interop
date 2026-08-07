@@ -35,6 +35,9 @@
 from enum import Enum
 import itertools
 import functools
+import traceback
+
+from pyparsing import Optional
 
 # ROS dependencies / utils
 from rclpy.action import ActionClient
@@ -150,6 +153,7 @@ class OrderExecutionErrors(Enum):
     """Order Processing - Execution Error types."""
 
     NAVIGATION_ERROR = "navigationError"
+    INTERNAL_ERROR = "internalError"
 
 # JLG_CHANGES_END
 
@@ -597,7 +601,7 @@ class VDA5050Controller(Node):
         self.logger.debug("Deleting action states.")
         self._update_state({"action_states": []})
 
-    def _get_action_status(self, action_id: str) -> str:
+    def _get_action_status(self, action_id: str) -> "Optional[str]":
         """
         Get the action status on the current state given action's ID.
 
@@ -607,7 +611,8 @@ class VDA5050Controller(Node):
 
         Returns
         -------
-            action_status (str): Action status
+            action_status (str): Action status, or None if the action is not tracked
+                on the current state.
                 ``VDACurrentAction.WAITING``
                 ``VDACurrentAction.INITIALIZING``
                 ``VDACurrentAction.RUNNING``
@@ -624,6 +629,13 @@ class VDA5050Controller(Node):
             ),
             None,
         )
+        # JLG_CHANGES_START
+        if action_state is None:
+            self.logger.error(
+                f"Couldn't find action with id: '{action_id}' to get its status."
+            )
+            return None
+        # JLG_CHANGES_END
         return action_state.action_status
 
     def _update_action_status(self, action_id: str, action_status: str, result_description: str = ""):
@@ -1334,6 +1346,23 @@ class VDA5050Controller(Node):
             # JLG_CHANGES_END
         ]
 
+        # JLG_CHANGES_START
+        # On stitching, the stitch node's actions are already tracked, so append only the
+        # actions that are not tracked yet. This preserves their current status and avoids
+        # dropping unrelated (edge / instant) action states.
+        if mode == OrderAcceptModes.STITCH:
+            tracked_action_ids = {
+                action_state.action_id for action_state in self._current_state.action_states
+            }
+            action_states = self._current_state.action_states + [
+                action_state
+                for action_state in self._get_action_states(order)
+                if action_state.action_id not in tracked_action_ids
+            ]
+        else:
+            action_states = self._get_action_states(order)
+        # JLG_CHANGES_END
+
         # Update state
         # Only on stitching updates the node and edges base states are kept
         self._update_state(
@@ -1345,8 +1374,7 @@ class VDA5050Controller(Node):
                 + self._get_node_states(order),
                 "edge_states": (mode == OrderAcceptModes.STITCH) * self._current_state.edge_states
                 + self._get_edge_states(order),
-                "action_states": self._current_state.action_states[:-len(order.nodes[0].actions)]
-                + self._get_action_states(order),
+                "action_states": action_states,
                 "new_base_request": False,
             }
         )
@@ -1569,6 +1597,45 @@ class VDA5050Controller(Node):
 
     def _on_active_order(self):
         """
+        Run the order state machine, shielding the executor from any failure.
+
+        An exception escaping a timer callback tears down the rclpy executor and kills the
+        controller process, stranding the robot mid-order. Report it instead.
+        """
+        # JLG_CHANGES_START
+        try:
+            self._on_active_order_impl()
+        except Exception as ex:
+            self.logger.error(
+                f"Unhandled exception while executing the order: {ex}\n{traceback.format_exc()}",
+                throttle_duration_sec=5,
+            )
+
+            error_description = f"Unhandled exception while executing the order: {ex}"
+            already_reported = any(
+                error.error_type == OrderExecutionErrors.INTERNAL_ERROR.value
+                and error.error_description == error_description
+                for error in self._current_state.errors
+            )
+            if not already_reported:
+                error = VDAError(
+                    error_type=OrderExecutionErrors.INTERNAL_ERROR.value,
+                    error_description=error_description,
+                    error_level=VDAError.FATAL,
+                    error_references=[
+                        VDAErrorReference(
+                            reference_key="order_id",
+                            reference_value=self._current_state.order_id,
+                        )
+                    ],
+                )
+                self._update_state(
+                    {"errors": self._current_state.errors + [error]}, publish_now=True
+                )
+        # JLG_CHANGES_END
+
+    def _on_active_order_impl(self):
+        """
         Execute order state machine.
 
         It first checks if there is an instruction to cancel the order.
@@ -1660,6 +1727,47 @@ class VDA5050Controller(Node):
         This same function filters any finished / failed action from the current node actions.
 
         """
+        # JLG_CHANGES_START
+        # Re-register actions that lost their state, otherwise they would never leave the
+        # WAITING check in send_adapter_process_vda_action and the order would stall.
+        untracked_actions = [
+            action
+            for action in self._current_node_actions
+            if self._get_action_status(action.action_id) is None
+        ]
+        if untracked_actions:
+            self._update_state({
+                "action_states": self._current_state.action_states + [
+                    VDACurrentAction(
+                        action_id=action.action_id,
+                        action_type=action.action_type,
+                        action_description=action.action_description,
+                        action_status=VDACurrentAction.WAITING,
+                    )
+                    for action in untracked_actions
+                ]
+            })
+            errors = [
+                VDAError(
+                    error_type=ActionErrors.ACTION_NOT_FOUND.value,
+                    error_description=(
+                        f"VDA5050 action with id {action.action_id} was missing from the"
+                        " action states and has been restored as WAITING"
+                    ),
+                    error_level=VDAError.WARNING,
+                    error_references=[
+                        VDAErrorReference(
+                            reference_key="action_id", reference_value=action.action_id
+                        )
+                    ],
+                )
+                for action in untracked_actions
+            ]
+            current_errors = self._current_state.errors
+            self._update_state({"errors": current_errors + errors}, publish_now=True)
+            self._update_state({"errors": current_errors})
+        # JLG_CHANGES_END
+
         # Remove finished / failed actions
         self._current_node_actions = [
             action

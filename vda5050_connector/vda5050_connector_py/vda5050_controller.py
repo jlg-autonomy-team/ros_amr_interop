@@ -37,6 +37,8 @@ import itertools
 import functools
 import traceback
 
+from pyparsing import Optional
+
 # ROS dependencies / utils
 from rclpy.action import ActionClient
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
@@ -599,7 +601,7 @@ class VDA5050Controller(Node):
         self.logger.debug("Deleting action states.")
         self._update_state({"action_states": []})
 
-    def _get_action_status(self, action_id: str) -> str:
+    def _get_action_status(self, action_id: str) -> "Optional[str]":
         """
         Get the action status on the current state given action's ID.
 

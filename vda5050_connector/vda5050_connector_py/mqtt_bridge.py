@@ -259,6 +259,8 @@ class MQTTBridge(Node):
         self.mqtt_password = read_str_parameter(self, "mqtt_password", "")
         # JLG_CHANGES_START
         self.mqtt_client_id = read_str_parameter(self, "mqtt_client_id", "")
+        self.mqtt_client_certificate = read_str_parameter(self, "mqtt_client_certificate", "")
+        self.mqtt_client_key = read_str_parameter(self, "mqtt_client_key", "")
         # JLG_CHANGES_END
 
         self.vda5050_version = read_str_parameter(self, "vda5050_protocol_version", "2.0.0")
@@ -285,7 +287,6 @@ class MQTTBridge(Node):
         # JLG_CHANGES_START
         self.mqtt_client = mqtt_client.Client(
             callback_api_version=mqtt_client.CallbackAPIVersion.VERSION2,
-            client_id=self.mqtt_client_id,
             clean_session=True,
             reconnect_on_failure=True,
         )
@@ -302,8 +303,8 @@ class MQTTBridge(Node):
                     default="/etc/ssl/certs/ca-certificates.crt",
                 ),
                 # JLG_CHANGES_START
-                certfile=os.getenv("VDA5050_CONNECTOR_TLS_CERTFILE"),
-                keyfile=os.getenv("VDA5050_CONNECTOR_TLS_KEYFILE"),
+                certfile=self.mqtt_client_certificate,
+                keyfile=self.mqtt_client_key,
                 # JLG_CHANGES_END
             )
             # JLG_CHANGES_START
@@ -413,7 +414,7 @@ class MQTTBridge(Node):
                 )
             )
         else:
-            self.logger.error("Failed to connect, return code %d\n", rc)
+            self.logger.error(f"Failed to connect, return code {rc}")
 
     def on_message_mqtt(self, client, userdata, msg):
         """MQTT client message callback."""

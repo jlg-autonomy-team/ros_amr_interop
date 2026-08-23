@@ -48,7 +48,10 @@ from vda5050_msgs.msg import Edge
 from vda5050_msgs.msg import NodePosition
 from vda5050_msgs.msg import Action
 from vda5050_msgs.msg import ActionParameter
+from vda5050_msgs.msg import AGVPosition
 from vda5050_msgs.msg import CurrentAction
+from vda5050_msgs.msg import EdgeState
+from vda5050_msgs.msg import NodeState
 
 
 def get_order_new(order_id=str(uuid4()), order_update_id=0):
@@ -842,3 +845,307 @@ def test_vda5050_controller_node_reject_order(
         error=OrderRejectErrors.ORDER_UPDATE_ERROR,
         description="New update id 0 lower than old update id 1",
     )
+
+
+def _make_navigate_through_nodes_feedback(x, y):
+    """Create a minimal feedback message stub with an AGVPosition at (x, y)."""
+
+    class _Feedback:
+        position = AGVPosition(x=x, y=y)
+
+    class _FeedbackMsg:
+        feedback = _Feedback()
+
+    return _FeedbackMsg()
+
+
+def _build_navigate_through_nodes_state(node):
+    """
+    Set up a VDA5050Controller with three nodes and two edges for
+    navigate-through-nodes single-pop and no-pop tests.
+
+    Nodes are placed on a straight line along the X axis:
+      node1 @ (0, 0)   sequence_id=0  – already traversed (last_node)
+      node2 @ (10, 0)  sequence_id=2  – first running node
+      node3 @ (20, 0)  sequence_id=4  – second running node (destination)
+
+    Edges:
+      edge1 sequence_id=1 (node1 -> node2)
+      edge2 sequence_id=3 (node2 -> node3)
+
+    The controller's _running_nodes, _running_edges, _unexecuted_nodes,
+    _unexecuted_edges, and _current_state.node_states / edge_states are
+    populated accordingly.  last_node is set to "node1" (already traversed).
+    """
+    nodes = [
+        Node(
+            node_id="node1",
+            sequence_id=0,
+            released=True,
+            node_position=NodePosition(x=0.0, y=0.0, map_id="map"),
+        ),
+        Node(
+            node_id="node2",
+            sequence_id=2,
+            released=True,
+            node_position=NodePosition(x=10.0, y=0.0, map_id="map"),
+        ),
+        Node(
+            node_id="node3",
+            sequence_id=4,
+            released=True,
+            node_position=NodePosition(x=20.0, y=0.0, map_id="map"),
+        ),
+    ]
+    edges = [
+        Edge(
+            edge_id="edge1",
+            sequence_id=1,
+            released=True,
+            start_node_id="node1",
+            end_node_id="node2",
+        ),
+        Edge(
+            edge_id="edge2",
+            sequence_id=3,
+            released=True,
+            start_node_id="node2",
+            end_node_id="node3",
+        ),
+    ]
+
+    # The first node is already reached; the remaining two are in the running lists.
+    node._running_nodes = list(nodes[1:])  # node2, node3
+    node._running_edges = list(edges)      # edge1, edge2
+    node._unexecuted_nodes = list(nodes[1:])
+    node._unexecuted_edges = list(edges)
+
+    node._current_state.node_states = [
+        NodeState(node_id=n.node_id, sequence_id=n.sequence_id, released=n.released)
+        for n in nodes[1:]
+    ]
+    node._current_state.edge_states = [
+        EdgeState(edge_id=e.edge_id, sequence_id=e.sequence_id, released=e.released)
+        for e in edges
+    ]
+    node._current_state.last_node_id = "node1"
+    node._current_state.last_node_sequence_id = 0
+
+    return nodes, edges
+
+
+def _build_navigate_through_nodes_state_multi_pop(node):
+    """
+    Set up a VDA5050Controller with four nodes and three edges for
+    the multi-pop feedback test.
+
+    Nodes are clustered very close together so a single robot position
+    can be within the arrival radius (0.5 m) of multiple consecutive nodes:
+      node1 @ (0.0, 0)   sequence_id=0  – already traversed (last_node)
+      node2 @ (0.1, 0)   sequence_id=2  – 1st running node (0.1 m from origin)
+      node3 @ (0.2, 0)   sequence_id=4  – 2nd running node (0.2 m from origin)
+      node4 @ (20.0, 0)  sequence_id=6  – final destination (far away)
+
+    With the robot at (0.1, 0):
+      - (0.1,0) is within 0.5 m of node2 (dist=0.0)  → pop
+      - (0.1,0) is within 0.5 m of node3 (dist=0.1)  → pop
+      - loop exits because only node4 remains (_running_nodes length drops to 1)
+
+    Edges:
+      edge1 sequence_id=1, edge2 sequence_id=3, edge3 sequence_id=5
+    """
+    nodes = [
+        Node(
+            node_id="node1",
+            sequence_id=0,
+            released=True,
+            node_position=NodePosition(x=0.0, y=0.0, map_id="map"),
+        ),
+        Node(
+            node_id="node2",
+            sequence_id=2,
+            released=True,
+            node_position=NodePosition(x=0.1, y=0.0, map_id="map"),
+        ),
+        Node(
+            node_id="node3",
+            sequence_id=4,
+            released=True,
+            node_position=NodePosition(x=0.2, y=0.0, map_id="map"),
+        ),
+        Node(
+            node_id="node4",
+            sequence_id=6,
+            released=True,
+            node_position=NodePosition(x=20.0, y=0.0, map_id="map"),
+        ),
+    ]
+    edges = [
+        Edge(
+            edge_id="edge1",
+            sequence_id=1,
+            released=True,
+            start_node_id="node1",
+            end_node_id="node2",
+        ),
+        Edge(
+            edge_id="edge2",
+            sequence_id=3,
+            released=True,
+            start_node_id="node2",
+            end_node_id="node3",
+        ),
+        Edge(
+            edge_id="edge3",
+            sequence_id=5,
+            released=True,
+            start_node_id="node3",
+            end_node_id="node4",
+        ),
+    ]
+
+    # node1 is already at last_node; node2/node3/node4 are the running nodes.
+    node._running_nodes = list(nodes[1:])   # node2, node3, node4
+    node._running_edges = list(edges)       # edge1, edge2, edge3
+    node._unexecuted_nodes = list(nodes[1:])
+    node._unexecuted_edges = list(edges)
+
+    node._current_state.node_states = [
+        NodeState(node_id=n.node_id, sequence_id=n.sequence_id, released=n.released)
+        for n in nodes[1:]
+    ]
+    node._current_state.edge_states = [
+        EdgeState(edge_id=e.edge_id, sequence_id=e.sequence_id, released=e.released)
+        for e in edges
+    ]
+    node._current_state.last_node_id = "node1"
+    node._current_state.last_node_sequence_id = 0
+
+    return nodes, edges
+
+
+def test_navigate_through_nodes_feedback_callback_single_pop(
+    adapter_node,
+    action_server_nav_to_node,
+    action_server_process_vda_action,
+    service_get_state,
+    service_supported_actions,
+):
+    """
+    Feedback that puts the robot within radius of the first running node
+    (node2) but not the second (node3) should pop exactly one node/edge.
+    """
+    controller = VDA5050Controller()
+    controller.logger.set_level(LoggingSeverity.DEBUG)
+
+    _build_navigate_through_nodes_state(controller)
+
+    # Position is at node2 exactly – within the default 0.5 m radius.
+    feedback_msg = _make_navigate_through_nodes_feedback(x=10.0, y=0.0)
+    controller._navigate_through_nodes_feedback_callback(feedback_msg)
+
+    # node2 / edge1 should have been popped; node3 / edge2 remain.
+    assert len(controller._running_nodes) == 1
+    assert controller._running_nodes[0].node_id == "node3"
+
+    assert len(controller._running_edges) == 1
+    assert controller._running_edges[0].edge_id == "edge2"
+
+    assert len(controller._unexecuted_nodes) == 1
+    assert controller._unexecuted_nodes[0].node_id == "node3"
+    assert len(controller._unexecuted_edges) == 1
+    assert controller._unexecuted_edges[0].edge_id == "edge2"
+
+    assert len(controller._current_state.node_states) == 1
+    assert controller._current_state.node_states[0].node_id == "node3"
+
+    assert len(controller._current_state.edge_states) == 1
+    assert controller._current_state.edge_states[0].edge_id == "edge2"
+
+    assert controller._current_state.last_node_id == "node2"
+    assert controller._current_state.last_node_sequence_id == 2
+
+
+def test_navigate_through_nodes_feedback_callback_multi_pop(
+    adapter_node,
+    action_server_nav_to_node,
+    action_server_process_vda_action,
+    service_get_state,
+    service_supported_actions,
+):
+    """
+    When the robot's reported position is within the arrival radius of
+    multiple consecutive running nodes, the callback must pop all of them
+    in a single invocation (multi-pop).
+
+    Setup: four nodes where node2 (0.1 m) and node3 (0.2 m) are very close
+    to the robot position (0.1, 0), so both are within the 0.5 m radius.
+    node4 is far away (20 m). The loop must:
+      1. pop node2/edge1 on the first iteration
+      2. pop node3/edge2 on the second iteration
+      3. stop because only node4 remains (_running_nodes length drops to 1)
+    """
+    controller = VDA5050Controller()
+    controller.logger.set_level(LoggingSeverity.DEBUG)
+
+    _build_navigate_through_nodes_state_multi_pop(controller)
+
+    # Robot at (0.1, 0) – within 0.5 m of both node2 (dist=0.0) and
+    # node3 (dist=0.1), but not node4 (dist≈19.9).
+    feedback_msg = _make_navigate_through_nodes_feedback(x=0.1, y=0.0)
+    controller._navigate_through_nodes_feedback_callback(feedback_msg)
+
+    # Both node2/edge1 AND node3/edge2 must have been popped.
+    # Only node4/edge3 remains.
+    assert len(controller._running_nodes) == 1
+    assert controller._running_nodes[0].node_id == "node4"
+
+    assert len(controller._running_edges) == 1
+    assert controller._running_edges[0].edge_id == "edge3"
+
+    assert len(controller._unexecuted_nodes) == 1
+    assert controller._unexecuted_nodes[0].node_id == "node4"
+
+    assert len(controller._unexecuted_edges) == 1
+    assert controller._unexecuted_edges[0].edge_id == "edge3"
+
+    assert len(controller._current_state.node_states) == 1
+    assert controller._current_state.node_states[0].node_id == "node4"
+
+    assert len(controller._current_state.edge_states) == 1
+    assert controller._current_state.edge_states[0].edge_id == "edge3"
+
+    # last_node must reflect the second popped node (node3), not just the first.
+    assert controller._current_state.last_node_id == "node3"
+    assert controller._current_state.last_node_sequence_id == 4
+
+
+def test_navigate_through_nodes_feedback_callback_no_pop_outside_radius(
+    adapter_node,
+    action_server_nav_to_node,
+    action_server_process_vda_action,
+    service_get_state,
+    service_supported_actions,
+):
+    """
+    Feedback with position outside the arrival radius of the first running
+    node should leave all state untouched.
+    """
+    controller = VDA5050Controller()
+    controller.logger.set_level(LoggingSeverity.DEBUG)
+
+    _build_navigate_through_nodes_state(controller)
+
+    # Position is far from both nodes (midpoint between node1 and node2).
+    feedback_msg = _make_navigate_through_nodes_feedback(x=5.0, y=0.0)
+    controller._navigate_through_nodes_feedback_callback(feedback_msg)
+
+    # Nothing should be popped.
+    assert len(controller._running_nodes) == 2
+    assert len(controller._running_edges) == 2
+
+    assert len(controller._current_state.node_states) == 2
+    assert len(controller._current_state.edge_states) == 2
+
+    assert controller._current_state.last_node_id == "node1"
+    assert controller._current_state.last_node_sequence_id == 0

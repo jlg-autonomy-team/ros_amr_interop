@@ -40,6 +40,7 @@ from vda5050_connector_py.vda5050_controller import OrderAcceptModes
 from vda5050_connector_py.vda5050_controller import OrderExecutionErrors
 from vda5050_connector_py.vda5050_controller import OrderRejectErrors
 from vda5050_connector_py.utils import get_vda5050_ts
+from action_msgs.msg import GoalStatus
 from vda5050_connector.action import NavigateToNode
 
 from vda5050_msgs.msg import Order
@@ -1149,3 +1150,69 @@ def test_navigate_through_nodes_feedback_callback_no_pop_outside_radius(
 
     assert controller._current_state.last_node_id == "node1"
     assert controller._current_state.last_node_sequence_id == 0
+
+
+def test_navigate_through_nodes_result_callback_success_multi_skipped(
+    adapter_node,
+    action_server_nav_to_node,
+    action_server_process_vda_action,
+    service_get_state,
+    service_supported_actions,
+):
+    """
+    When a successful navigation result arrives and multiple intermediate nodes
+    still remain in ``_running_nodes`` (proximity-based feedback never detected
+    them as reached), the result callback must:
+
+    * remove ALL traversed edge states from ``edge_states`` and
+      ``_unexecuted_edges``,
+    * remove skipped (intermediate) node states from ``node_states`` and
+      ``_unexecuted_nodes``,
+    * clear both ``_running_nodes`` and ``_running_edges``, and
+    * leave only the final destination node for ``_process_node`` to handle
+      (verified through its state side-effects on ``node_states`` and
+      ``last_node_id``/``last_node_sequence_id``).
+
+    Setup uses the multi-pop fixture: node2 / node3 / node4 in
+    ``_running_nodes``; edge1 / edge2 / edge3 in ``_running_edges``.
+    Neither node2 nor node3 was ever detected as reached by the feedback
+    callback, so both are "skipped" intermediate nodes.
+    """
+    controller = VDA5050Controller()
+    controller.logger.set_level(LoggingSeverity.DEBUG)
+
+    _build_navigate_through_nodes_state_multi_pop(controller)
+
+    # Simulate a successful action result: no error, status not ABORTED.
+    class _MockResultResponse:
+        class _Result:
+            error = False
+            error_code = 0
+
+        result = _Result()
+        status = GoalStatus.STATUS_SUCCEEDED
+
+    future = Future()
+    future.set_result(_MockResultResponse())
+
+    # Invoke the implementation directly to bypass goal-handle teardown.
+    controller._navigate_through_nodes_result_callback_impl(future)
+
+    # Both running lists must be emptied by the callback.
+    assert controller._running_nodes == []
+    assert controller._running_edges == []
+
+    # All three edges were traversed → edge_states and _unexecuted_edges
+    # must be empty.
+    assert controller._current_state.edge_states == []
+    assert controller._unexecuted_edges == []
+
+    # _process_node(node4) removes the final node from node_states and
+    # updates last_node, so node_states and _unexecuted_nodes must be empty.
+    assert controller._current_state.node_states == []
+    assert controller._unexecuted_nodes == []
+
+    # last_node must reflect the final destination (node4), not an
+    # intermediate skipped node.
+    assert controller._current_state.last_node_id == "node4"
+    assert controller._current_state.last_node_sequence_id == 6

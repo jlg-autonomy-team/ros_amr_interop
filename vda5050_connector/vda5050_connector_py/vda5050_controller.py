@@ -2015,8 +2015,7 @@ class VDA5050Controller(Node):
                 "edge_states": [
                     edge_state
                     for edge_state in self._current_state.edge_states
-                    if edge_state.edge_id != last_edge.edge_id
-                    and edge_state.sequence_id != last_edge.sequence_id
+                    if edge_state.sequence_id != last_edge.sequence_id
                 ]
             }
         )
@@ -2128,8 +2127,7 @@ class VDA5050Controller(Node):
                 "edge_states": [
                     edge_state
                     for edge_state in self._current_state.edge_states
-                    if edge_state.edge_id != edge.edge_id
-                    and edge_state.sequence_id != edge.sequence_id
+                    if edge_state.sequence_id != edge.sequence_id
                 ],
                 "node_states": [
                     node_state
@@ -2155,16 +2153,19 @@ class VDA5050Controller(Node):
             feedback_msg: Feedback message from action server.
 
         """
-        # guard against empty lists
-        # keep the last node until navigation has stopped
-        if len(self._running_nodes) <= 1 or len(self._running_edges) <= 1:
-            return
-
-        # remove nodes that have been reached
-        if self._is_point_in_radius(feedback_msg.feedback.position, self._running_nodes[0].node_position, self._node_arrived_radius_squared):
+        # Feedback is sampled, so a single message may cover several nodes at once.
+        # The last node is kept until navigation stops; the result callback handles it.
+        while len(self._running_nodes) > 1 and len(self._running_edges) > 1:
+            if not self._is_point_in_radius(
+                feedback_msg.feedback.position,
+                self._running_nodes[0].node_position,
+                self._node_arrived_radius_squared,
+            ):
+                break
             self.logger.info(f"Reached node: {self._running_nodes[0].node_id}")
             self._pop_traversed_nodes(self._running_nodes[0], self._running_edges[0])
-            
+
+
     def _get_start_node(self) -> VDANode:
         """
         Get the node the robot is currently at (the last reached node).
@@ -2362,20 +2363,46 @@ class VDA5050Controller(Node):
             self.logger.error("No current edges or nodes to process after navigation.")
             return
 
-        # pop the last edge and node
-        last_edge = self._running_edges[-1]
+        # Pop the whole traversed group: proximity based popping is sampled, so intermediate
+        # nodes may never have been detected as reached and would otherwise stall the order.
         last_node = self._running_nodes[-1]
+        traversed_edge_sequence_ids = {edge.sequence_id for edge in self._running_edges}
+        skipped_node_sequence_ids = {
+            node.sequence_id for node in self._running_nodes[:-1]
+        }
+
+        if skipped_node_sequence_ids:
+            self.logger.warning(
+                f"Nodes with sequence ids {sorted(skipped_node_sequence_ids)} were traversed"
+                " without being detected as reached. Removing them from the order state."
+            )
+
         self._update_state(
             {
                 "edge_states": [
                     edge_state
                     for edge_state in self._current_state.edge_states
-                    if edge_state.edge_id != last_edge.edge_id
-                    and edge_state.sequence_id != last_edge.sequence_id
-                ]
+                    if edge_state.sequence_id not in traversed_edge_sequence_ids
+                ],
+                "node_states": [
+                    node_state
+                    for node_state in self._current_state.node_states
+                    if node_state.sequence_id not in skipped_node_sequence_ids
+                ],
             }
         )
-        self._unexecuted_edges = [edge for edge in self._unexecuted_edges if edge not in self._running_edges]
+        self._unexecuted_edges = [
+            edge
+            for edge in self._unexecuted_edges
+            if edge.sequence_id not in traversed_edge_sequence_ids
+        ]
+        self._unexecuted_nodes = [
+            node
+            for node in self._unexecuted_nodes
+            if node.sequence_id not in skipped_node_sequence_ids
+        ]
+        self._running_edges = []
+        self._running_nodes = []
 
         self._process_node(node=last_node)
 

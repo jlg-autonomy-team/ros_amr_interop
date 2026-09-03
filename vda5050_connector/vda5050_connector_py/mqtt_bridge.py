@@ -258,7 +258,6 @@ class MQTTBridge(Node):
         self.mqtt_username = read_str_parameter(self, "mqtt_username", "")
         self.mqtt_password = read_str_parameter(self, "mqtt_password", "")
         # JLG_CHANGES_START
-        self.mqtt_client_id = read_str_parameter(self, "mqtt_client_id", "")
         self.mqtt_client_certificate = read_str_parameter(self, "mqtt_client_certificate", "")
         self.mqtt_client_key = read_str_parameter(self, "mqtt_client_key", "")
         # JLG_CHANGES_END

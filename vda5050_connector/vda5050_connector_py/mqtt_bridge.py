@@ -258,6 +258,9 @@ class MQTTBridge(Node):
         self.mqtt_username = read_str_parameter(self, "mqtt_username", "")
         self.mqtt_password = read_str_parameter(self, "mqtt_password", "")
         # JLG_CHANGES_START
+        self.mqtt_ca_cert = read_str_parameter(
+                    self, "mqtt_ca_cert", "/etc/ssl/certs/ca-certificates.crt"
+                )
         self.mqtt_client_certificate = read_str_parameter(self, "mqtt_client_certificate", "")
         self.mqtt_client_key = read_str_parameter(self, "mqtt_client_key", "")
         # JLG_CHANGES_END
@@ -297,10 +300,7 @@ class MQTTBridge(Node):
         # Enable TLS if username is provided
         if self.mqtt_username:
             self.mqtt_client.tls_set(
-                ca_certs=os.getenv(
-                    key="VDA5050_CONNECTOR_TLS_CA_CERT",
-                    default="/etc/ssl/certs/ca-certificates.crt",
-                ),
+                ca_certs=self.mqtt_ca_cert,
                 # JLG_CHANGES_START
                 certfile=self.mqtt_client_certificate,
                 keyfile=self.mqtt_client_key,

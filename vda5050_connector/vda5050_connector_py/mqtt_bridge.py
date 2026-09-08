@@ -301,8 +301,8 @@ class MQTTBridge(Node):
             self.mqtt_client.tls_set(
                 ca_certs=self.mqtt_ca_cert,
                 # JLG_CHANGES_START
-                certfile=self.mqtt_client_certificate,
-                keyfile=self.mqtt_client_key,
+                certfile=self.mqtt_client_certificate or None,
+                keyfile=self.mqtt_client_key or None,
                 # JLG_CHANGES_END
             )
             # JLG_CHANGES_START

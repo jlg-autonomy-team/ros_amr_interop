@@ -194,7 +194,9 @@ def mock_mqtt_client(mocker):
     mock_mqtt_client = mock.return_value
     mock_mqtt_client.subscribe = mocker.MagicMock(return_value=(fake_rc, fake_mid))
     mock_mqtt_client.unsubscribe = mocker.MagicMock(return_value=(fake_rc, fake_mid))
-    mock_mqtt_client.publish = mocker.MagicMock(return_value=(fake_rc, fake_mid))
+    publish_result = mqtt.MQTTMessageInfo(fake_mid)
+    publish_result.rc = fake_rc
+    mock_mqtt_client.publish = mocker.MagicMock(return_value=publish_result)
     mock_mqtt_client.connect.return_value = 0
     mock_mqtt_client.reconnect.return_value = 0
     mock_mqtt_client.disconnect.return_value = 0

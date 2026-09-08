@@ -36,7 +36,6 @@ from paho.mqtt import client as mqtt_client
 from paho.mqtt.client import error_string
 import copy
 import json
-import ssl
 import os
 # JLG_CHANGES_START
 import time

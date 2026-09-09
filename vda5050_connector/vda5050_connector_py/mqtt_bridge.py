@@ -258,8 +258,13 @@ class MQTTBridge(Node):
         self.mqtt_password = read_str_parameter(self, "mqtt_password", "")
         # JLG_CHANGES_START
         self.mqtt_ca_cert = read_str_parameter(
-                    self, "mqtt_ca_cert", "/etc/ssl/certs/ca-certificates.crt"
-                )
+            self,
+            "mqtt_ca_cert",
+            os.getenv(
+                key="VDA5050_CONNECTOR_TLS_CA_CERT",
+                default="/etc/ssl/certs/ca-certificates.crt",
+            ),
+        )
         self.mqtt_client_certificate = read_str_parameter(self, "mqtt_client_certificate", "")
         self.mqtt_client_key = read_str_parameter(self, "mqtt_client_key", "")
         # JLG_CHANGES_END

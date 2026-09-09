@@ -503,8 +503,8 @@ def test_vda5050_mqtt_bridge_defaults_with_tls(
             ca_certs=tls_parameters.get(
                 "mqtt_ca_cert", "/etc/ssl/certs/ca-certificates.crt"
             ),
-            certfile=tls_parameters.get("mqtt_client_certificate", ""),
-            keyfile=tls_parameters.get("mqtt_client_key", ""),
+            certfile=tls_parameters.get("mqtt_client_certificate") or None,
+            keyfile=tls_parameters.get("mqtt_client_key") or None,
         )
         mock_mqtt_client.username_pw_set.assert_called_once_with(
             username="username", password=mqtt_password or None

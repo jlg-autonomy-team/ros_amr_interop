@@ -432,7 +432,10 @@ def test_vda5050_mqtt_bridge_generate_vda_instant_action_msg_on_v1_msg(mocker):
     assert action_params[4].key == "k5" and action_params[4].value == "['foo', 'bar']"
 
 
-def test_vda5050_mqtt_bridge_defaults(setup_rclpy, mocker, mock_mqtt_client):
+def test_vda5050_mqtt_bridge_defaults(
+    setup_rclpy, mocker, mock_mqtt_client, monkeypatch
+):
+    monkeypatch.delenv("VDA5050_CONNECTOR_TLS_CA_CERT", raising=False)
     mqtt_bridge = MQTTBridge()
     assert mqtt_bridge._manufacturer_name == "robots"
     assert mqtt_bridge._serial_number == "robot_1"

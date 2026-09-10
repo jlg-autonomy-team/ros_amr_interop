@@ -228,6 +228,17 @@ def get_order_update(order_id=str(uuid4()), order_update_id=0):
     )
 
 
+def get_navigation_result_future():
+    future = Future()
+    future.set_result(
+        NavigateToNode.Impl.GetResultService.Response(
+            status=GoalStatus.STATUS_SUCCEEDED,
+            result=NavigateToNode.Result(),
+        )
+    )
+    return future
+
+
 def get_stitch_orders(order_id=str(uuid4())):
     action1 = Action(
         action_type="foo",
@@ -504,8 +515,7 @@ def test_vda5050_controller_node_new_order(
     )
 
     # Future for invoking adapter navigation goal result callback
-    future = Future()
-    future.set_result(result=NavigateToNode.Result())
+    future = get_navigation_result_future()
 
     spy_send_adapter_navigate_to_node.reset_mock()
     # Simulate the adapter reached navigation goal
@@ -587,8 +597,7 @@ def test_vda5050_controller_node_update_order(
     rclpy.spin_once(adapter_node)
 
     # Simulate the adapter reached navigation goals
-    future = Future()
-    future.set_result(result=NavigateToNode.Result())
+    future = get_navigation_result_future()
 
     # The NEW order contains 5 nodes and 4 edges. The first node (in deviation range)
     # is processed and remove, and 4 nodes are send to navigate to.
@@ -634,8 +643,7 @@ def test_vda5050_controller_node_update_order(
     )
 
     # Future for invoking adapter navigation goal result callback
-    future = Future()
-    future.set_result(result=NavigateToNode.Result())
+    future = get_navigation_result_future()
 
     # Simulate the adapter reached navigation goal
     node._navigate_to_node_result_callback(future)
@@ -672,8 +680,7 @@ def test_vda5050_controller_node_stitch_order(
     rclpy.spin_once(adapter_node)
 
     # Simulate the adapter reached navigation goals
-    future = Future()
-    future.set_result(result=NavigateToNode.Result())
+    future = get_navigation_result_future()
 
     # The base order contains 2 nodes and 1 edge. The first node (in deviation range)
     # is processed and removed, and 1 node is sent to navigate to.
@@ -694,7 +701,7 @@ def test_vda5050_controller_node_stitch_order(
     assert len(node._current_order.nodes) == 3
     assert len(node._current_order.edges) == 2
 
-    assert len(node._current_state.node_states) == 2
+    assert len(node._current_state.node_states) == 1
     assert len(node._current_state.edge_states) == 1
     assert len(node._current_state.action_states) == 3
 
@@ -702,7 +709,7 @@ def test_vda5050_controller_node_stitch_order(
     assert node._current_state.last_node_sequence_id == 2
 
     node._navigate_to_node_result_callback(future)
-    assert len(node._current_state.node_states) == 1
+    assert len(node._current_state.node_states) == 0
     assert len(node._current_state.edge_states) == 0
     assert len(node._current_state.action_states) == 3
 
@@ -825,8 +832,7 @@ def test_vda5050_controller_node_reject_order(
     node.process_order(order)
 
     # Simulate the adapter reached navigation goals
-    future = Future()
-    future.set_result(result=NavigateToNode.Result())
+    future = get_navigation_result_future()
 
     # The NEW order contains 5 nodes and 4 edges. The first node (in deviation range)
     # is processed and remove, and 4 nodes are send to navigate to.

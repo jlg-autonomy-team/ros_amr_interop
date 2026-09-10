@@ -36,7 +36,6 @@ from paho.mqtt import client as mqtt_client
 from paho.mqtt.client import error_string
 import copy
 import json
-import ssl
 import os
 # JLG_CHANGES_START
 import time
@@ -257,6 +256,18 @@ class MQTTBridge(Node):
         self.mqtt_port = read_int_parameter(self, "mqtt_port", 1883)
         self.mqtt_username = read_str_parameter(self, "mqtt_username", "")
         self.mqtt_password = read_str_parameter(self, "mqtt_password", "")
+        # JLG_CHANGES_START
+        self.mqtt_ca_cert = read_str_parameter(
+            self,
+            "mqtt_ca_cert",
+            os.getenv(
+                key="VDA5050_CONNECTOR_TLS_CA_CERT",
+                default="/etc/ssl/certs/ca-certificates.crt",
+            ),
+        )
+        self.mqtt_client_certificate = read_str_parameter(self, "mqtt_client_certificate", "")
+        self.mqtt_client_key = read_str_parameter(self, "mqtt_client_key", "")
+        # JLG_CHANGES_END
 
         self.vda5050_version = read_str_parameter(self, "vda5050_protocol_version", "2.0.0")
         self.vda5050_version_alias = generate_vda5050_topic_alias(self.vda5050_version)
@@ -280,7 +291,11 @@ class MQTTBridge(Node):
     def configure(self):
         # Configure MQTT
         # JLG_CHANGES_START
-        self.mqtt_client = mqtt_client.Client(callback_api_version=mqtt_client.CallbackAPIVersion.VERSION2, clean_session=True, reconnect_on_failure=True)
+        self.mqtt_client = mqtt_client.Client(
+            callback_api_version=mqtt_client.CallbackAPIVersion.VERSION2,
+            clean_session=True,
+            reconnect_on_failure=True,
+        )
         # JLG_CHANGES_END
         self.mqtt_client.on_connect = self.on_connect_mqtt
         self.mqtt_client.on_message = self.on_message_mqtt
@@ -289,15 +304,22 @@ class MQTTBridge(Node):
         # Enable TLS if username is provided
         if self.mqtt_username:
             self.mqtt_client.tls_set(
-                ca_certs=os.getenv(
-                    key="VDA5050_CONNECTOR_TLS_CA_CERT",
-                    default="/etc/ssl/certs/ca-certificates.crt",
-                ),
-                tls_version=ssl.PROTOCOL_TLSv1_2,
+                ca_certs=self.mqtt_ca_cert,
+                # JLG_CHANGES_START
+                certfile=self.mqtt_client_certificate or None,
+                keyfile=self.mqtt_client_key or None,
+                # JLG_CHANGES_END
             )
+            # JLG_CHANGES_START
+            # Azure Event Grid requires the CONNECT username to be set to the
+            # client authentication name even when using certificate auth.
+            # The password is only sent for SAS-token auth; for cert auth it
+            # is omitted (username_pw_set with password=None -> u1/p0).
             self.mqtt_client.username_pw_set(
-                username=self.mqtt_username, password=self.mqtt_password
+                username=self.mqtt_username,
+                password=self.mqtt_password if self.mqtt_password else None,
             )
+            # JLG_CHANGES_END
 
         # Configure will message or last testament message
         will_topic = get_vda5050_mqtt_topic(
@@ -395,7 +417,7 @@ class MQTTBridge(Node):
                 )
             )
         else:
-            self.logger.error("Failed to connect, return code %d\n", rc)
+            self.logger.error(f"Failed to connect, return code {rc}")
 
     def on_message_mqtt(self, client, userdata, msg):
         """MQTT client message callback."""

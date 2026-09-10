@@ -29,9 +29,10 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import ssl
 from uuid import uuid4
-from paho.mqtt.client import MQTTMessage
+from paho.mqtt.client import ConnectFlags, MQTTMessage
+from paho.mqtt.packettypes import PacketTypes
+from paho.mqtt.reasoncodes import ReasonCode
 from unittest.mock import MagicMock
 import pytest
 import json
@@ -431,10 +432,16 @@ def test_vda5050_mqtt_bridge_generate_vda_instant_action_msg_on_v1_msg(mocker):
     assert action_params[4].key == "k5" and action_params[4].value == "['foo', 'bar']"
 
 
-def test_vda5050_mqtt_bridge_defaults(setup_rclpy, mocker, mock_mqtt_client):
+def test_vda5050_mqtt_bridge_defaults(
+    setup_rclpy, mocker, mock_mqtt_client, monkeypatch
+):
+    monkeypatch.delenv("VDA5050_CONNECTOR_TLS_CA_CERT", raising=False)
     mqtt_bridge = MQTTBridge()
     assert mqtt_bridge._manufacturer_name == "robots"
     assert mqtt_bridge._serial_number == "robot_1"
+    assert mqtt_bridge.mqtt_ca_cert == "/etc/ssl/certs/ca-certificates.crt"
+    assert mqtt_bridge.mqtt_client_certificate == ""
+    assert mqtt_bridge.mqtt_client_key == ""
     mqtt_client = mqtt_bridge.mqtt_client
     assert mqtt_client.tls_set.call_count == 0
     assert mqtt_client.username_pw_set.call_count == 0
@@ -449,48 +456,118 @@ def test_vda5050_mqtt_bridge_defaults(setup_rclpy, mocker, mock_mqtt_client):
     will_payload = convert_ros_message_to_json(msg)
 
     mqtt_client.will_set.assert_called_with(
-        topic="uagv/v1/robots/robot_1/connection",
+        topic="uagv/v2/robots/robot_1/connection",
         payload=will_payload,
         qos=1,
         retain=True,
     )
-    mqtt_client.connect_async.assert_called_with(host="localhost", port=1883)
+    mqtt_client.connect_async.assert_called_with(
+        host="localhost", port=1883, keepalive=60
+    )
 
 
+@pytest.mark.parametrize("mqtt_password", ["", "password"])
+@pytest.mark.parametrize(
+    "tls_parameters",
+    [
+        {},
+        {
+            "mqtt_client_certificate": "/foo/client.pem",
+            "mqtt_client_key": "/foo/client.key",
+        },
+        {
+            "mqtt_ca_cert": "/foo/ca-certificates.crt",
+            "mqtt_client_certificate": "/foo/client.pem",
+            "mqtt_client_key": "/foo/client.key",
+        },
+    ],
+    ids=["default-ca", "client-certificate", "custom-ca-and-client-certificate"],
+)
 def test_vda5050_mqtt_bridge_defaults_with_tls(
-    setup_rclpy, mocker, monkeypatch, mock_mqtt_client
+    setup_rclpy, mocker, mock_mqtt_client, mqtt_password, tls_parameters
 ):
+    parameters = {
+        "mqtt_address": "fake_localhost",
+        "mqtt_username": "username",
+        "mqtt_password": mqtt_password,
+        **tls_parameters,
+    }
+
     def mock_read_str_parameter(node, param_name, alternative):
-        return {
-            "mqtt_address": "fake_localhost",
-            "mqtt_username": "username",
-            "mqtt_password": "password",
-            "manufacturer_name": "robots",
-            "serial_number": "robot_1",
-        }[param_name]
+        return parameters.get(param_name, alternative)
 
     mocker.patch(
-        "vda5050_connector.mqtt_bridge.read_str_parameter",
+        "vda5050_connector_py.mqtt_bridge.read_str_parameter",
         side_effect=mock_read_str_parameter,
     )
     mqtt_bridge = MQTTBridge()
-    mqtt_client = mqtt_bridge.mqtt_client
-    mqtt_client.tls_set.assert_called_with(
-        ca_certs="/etc/ssl/certs/ca-certificates.crt", tls_version=ssl.PROTOCOL_TLSv1_2
-    )
-    mqtt_client.username_pw_set.assert_called_with(
-        username="username", password="password"
-    )
-    mqtt_client.connect_async.assert_called_with(host="fake_localhost", port=1883)
+    try:
+        mock_mqtt_client.tls_set.assert_called_once_with(
+            ca_certs=tls_parameters.get(
+                "mqtt_ca_cert", "/etc/ssl/certs/ca-certificates.crt"
+            ),
+            certfile=tls_parameters.get("mqtt_client_certificate") or None,
+            keyfile=tls_parameters.get("mqtt_client_key") or None,
+        )
+        mock_mqtt_client.username_pw_set.assert_called_once_with(
+            username="username", password=mqtt_password or None
+        )
+        mock_mqtt_client.connect_async.assert_called_once_with(
+            host="fake_localhost", port=1883, keepalive=60
+        )
+    finally:
+        mqtt_bridge.destroy_node()
 
-    # Test TLS ca-cert path environment variable
-    monkeypatch.setenv(
-        name="VDA5050_CONNECTOR_TLS_CA_CERT", value="/foo/ca-certificates.crt"
-    )
+
+def test_vda5050_mqtt_bridge_on_connect(setup_rclpy, mocker, mock_mqtt_client):
     mqtt_bridge = MQTTBridge()
-    mqtt_bridge.mqtt_client.tls_set.assert_called_with(
-        ca_certs="/foo/ca-certificates.crt", tls_version=ssl.PROTOCOL_TLSv1_2
-    )
+    try:
+        mqtt_bridge.on_connect_mqtt(
+            client=mock_mqtt_client,
+            userdata=None,
+            flags=ConnectFlags(session_present=False),
+            rc=ReasonCode(PacketTypes.CONNACK, "Success"),
+            properties=None,
+        )
+
+        assert mock_mqtt_client.subscribe.call_args_list == [
+            mocker.call("uagv/v2/robots/robot_1/order"),
+            mocker.call("uagv/v2/robots/robot_1/instantActions"),
+        ]
+        mock_mqtt_client.publish.assert_called_once()
+        topic, payload = mock_mqtt_client.publish.call_args.args
+        assert topic == "uagv/v2/robots/robot_1/connection"
+        assert json.loads(payload)["connectionState"] == Connection.ONLINE
+    finally:
+        mqtt_bridge.destroy_node()
+
+
+@pytest.mark.parametrize(
+    "reason_code",
+    [5, ReasonCode(PacketTypes.CONNACK, "Not authorized")],
+    ids=["integer-code", "paho-v2-reason-code"],
+)
+def test_vda5050_mqtt_bridge_on_connect_failure(
+    setup_rclpy, mocker, mock_mqtt_client, reason_code
+):
+    mqtt_bridge = MQTTBridge()
+    log_error = mocker.spy(mqtt_bridge.logger, "error")
+    try:
+        mqtt_bridge.on_connect_mqtt(
+            client=mock_mqtt_client,
+            userdata=None,
+            flags=ConnectFlags(session_present=False),
+            rc=reason_code,
+            properties=None,
+        )
+
+        log_error.assert_called_once_with(
+            f"Failed to connect, return code {reason_code}"
+        )
+        mock_mqtt_client.subscribe.assert_not_called()
+        mock_mqtt_client.publish.assert_not_called()
+    finally:
+        mqtt_bridge.destroy_node()
 
 
 def test_vda5050_mqtt_bridge_subscriptions(setup_rclpy, mocker, mock_mqtt_client):

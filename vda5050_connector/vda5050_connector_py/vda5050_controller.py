@@ -289,7 +289,7 @@ class VDA5050Controller(Node):
     def _configure_action_clients(self):
         """Configure Controller <> Adapter ROS Action interfaces."""
         base_interface_name = (
-            f"{self.get_namespace()}/{self._manufacturer_name}/{self._robot_name}/"
+            f"{self.get_namespace().rstrip('/')}/{self._manufacturer_name}/{self._robot_name}/"
         )
         # Action client for sending NavigateToNode goals to adapter
         self._navigate_to_node_act_cli = ActionClient(
@@ -333,7 +333,7 @@ class VDA5050Controller(Node):
     def _configure_service_clients(self):
         """Configure Controller <> Adapter ROS Service interfaces."""
         base_interface_name = (
-            f"{self.get_namespace()}/{self._manufacturer_name}/{self._robot_name}/"
+            f"{self.get_namespace().rstrip('/')}/{self._manufacturer_name}/{self._robot_name}/"
         )
         # Service client to request GetState from the adapter
         self._get_adapter_state_svc_cli = self.create_client(

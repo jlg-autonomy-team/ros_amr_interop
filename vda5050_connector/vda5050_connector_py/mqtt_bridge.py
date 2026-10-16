@@ -63,7 +63,7 @@ from vda5050_connector_py.geo_conversion import COORDINATE_SYSTEM_CARTESIAN
 from vda5050_connector_py.geo_conversion import COORDINATE_SYSTEM_WGS84
 from vda5050_connector_py.geo_conversion import SUPPORTED_COORDINATE_SYSTEMS
 from vda5050_connector_py.geo_conversion import NavSatGeoConverter
-from vda5050_connector_py.geo_conversion import WireCoordinateTranslator
+from vda5050_connector_py.geo_conversion import GeoCoordinateTranslator
 # JLG_CHANGES_END
 from vda5050_connector_py.utils import convert_ros_message_to_json
 from vda5050_connector_py.utils import get_vda5050_ts
@@ -291,7 +291,7 @@ class MQTTBridge(Node):
             self, "broker_comm_loss_dtc", 2456
         )
 
-        # Coordinate system used on the VDA5050 wire: "cartesian" (map frame, meters) or
+        # Coordinate system used in VDA5050 MQTT messages: "cartesian" (map frame, meters) or
         # "wgs84" (x=longitude, y=latitude [deg], theta=ENU yaw [rad]).
         self.coordinate_system = read_str_parameter(
             self, "coordinate_system", COORDINATE_SYSTEM_CARTESIAN
@@ -313,14 +313,14 @@ class MQTTBridge(Node):
         return self.coordinate_system == COORDINATE_SYSTEM_WGS84
 
     def _order_to_map(self, order: dict) -> dict:
-        if self._wire_translator is None:
+        if self._geo_translator is None:
             return order
-        return self._wire_translator.order_to_map(order)
+        return self._geo_translator.order_to_map(order)
 
     def _instant_actions_to_map(self, instant_actions: dict) -> dict:
-        if self._wire_translator is None:
+        if self._geo_translator is None:
             return instant_actions
-        return self._wire_translator.instant_actions_to_map(instant_actions)
+        return self._geo_translator.instant_actions_to_map(instant_actions)
     # JLG_CHANGES_END
 
     def configure(self):
@@ -402,15 +402,15 @@ class MQTTBridge(Node):
         )
 
         # Must exist before MQTT messages can arrive.
-        self._wire_translator = None
+        self._geo_translator = None
         if self.uses_geographic_coordinates:
-            self._wire_translator = WireCoordinateTranslator(
+            self._geo_translator = GeoCoordinateTranslator(
                 converter=NavSatGeoConverter(node=self, timeout_sec=self.geo_service_timeout),
                 map_id=self.geo_map_id,
                 logger=self.logger,
             )
             self.logger.info(
-                "VDA5050 coordinates on the wire are WGS84 (x=longitude, y=latitude)"
+                "VDA5050 MQTT coordinates are WGS84 (x=longitude, y=latitude)"
             )
         # JLG_CHANGES_END
 
@@ -724,8 +724,8 @@ class MQTTBridge(Node):
 
         """
         # JLG_CHANGES_START
-        if self._wire_translator is not None:
-            msg = self._wire_translator.state_to_wire(msg)
+        if self._geo_translator is not None:
+            msg = self._geo_translator.state_to_wgs84(msg)
         # JLG_CHANGES_END
         topic = get_vda5050_mqtt_topic(
             manufacturer=self._manufacturer_name,
@@ -770,8 +770,8 @@ class MQTTBridge(Node):
 
         """
         # JLG_CHANGES_START
-        if self._wire_translator is not None:
-            msg = self._wire_translator.visualization_to_wire(msg)
+        if self._geo_translator is not None:
+            msg = self._geo_translator.visualization_to_wgs84(msg)
         # JLG_CHANGES_END
         topic = get_vda5050_mqtt_topic(
             manufacturer=self._manufacturer_name,

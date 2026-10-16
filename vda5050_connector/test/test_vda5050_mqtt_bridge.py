@@ -444,7 +444,7 @@ def test_vda5050_mqtt_bridge_defaults(
     assert mqtt_bridge.mqtt_client_key == ""
     assert mqtt_bridge.coordinate_system == "cartesian"
     assert not mqtt_bridge.uses_geographic_coordinates
-    assert mqtt_bridge._wire_translator is None
+    assert mqtt_bridge._geo_translator is None
     mqtt_client = mqtt_bridge.mqtt_client
     assert mqtt_client.tls_set.call_count == 0
     assert mqtt_client.username_pw_set.call_count == 0

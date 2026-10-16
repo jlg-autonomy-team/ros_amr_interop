@@ -33,7 +33,7 @@ import math
 import pytest
 
 from vda5050_connector_py.geo_conversion import GeoConversionError
-from vda5050_connector_py.geo_conversion import WireCoordinateTranslator
+from vda5050_connector_py.geo_conversion import GeoCoordinateTranslator
 from vda5050_msgs.msg import ControlPoint
 from vda5050_msgs.msg import EdgeState
 from vda5050_msgs.msg import NodeState
@@ -125,7 +125,7 @@ def get_order():
 
 
 def test_order_to_map_converts_positions_and_headings():
-    translator = WireCoordinateTranslator(FakeConverter())
+    translator = GeoCoordinateTranslator(FakeConverter())
     original = get_order()
 
     order = translator.order_to_map(original)
@@ -151,7 +151,7 @@ def test_order_to_map_tangential_orientation_unchanged():
     order = get_order()
     order["edges"][0]["orientation_type"] = "TANGENTIAL"
 
-    converted = WireCoordinateTranslator(FakeConverter()).order_to_map(order)
+    converted = GeoCoordinateTranslator(FakeConverter()).order_to_map(order)
 
     assert converted["edges"][0]["orientation"] == 0.5
 
@@ -163,12 +163,12 @@ def test_order_to_map_without_coordinates_is_passthrough():
     order["edges"][0]["orientation_type"] = "TANGENTIAL"
 
     converter = FakeConverter(ready=False)
-    assert WireCoordinateTranslator(converter).order_to_map(order) == order
+    assert GeoCoordinateTranslator(converter).order_to_map(order) == order
 
 
 def test_order_to_map_rejects_when_not_ready():
     with pytest.raises(GeoConversionError):
-        WireCoordinateTranslator(FakeConverter(ready=False)).order_to_map(get_order())
+        GeoCoordinateTranslator(FakeConverter(ready=False)).order_to_map(get_order())
 
 
 def test_instant_actions_init_position_to_map():
@@ -194,7 +194,7 @@ def test_instant_actions_init_position_to_map():
         ]
     }
 
-    converted = WireCoordinateTranslator(FakeConverter()).instant_actions_to_map(
+    converted = GeoCoordinateTranslator(FakeConverter()).instant_actions_to_map(
         instant_actions
     )
 
@@ -206,10 +206,10 @@ def test_instant_actions_init_position_to_map():
     assert converted["actions"][1] == instant_actions["actions"][1]
 
 
-def test_state_to_wire_round_trip_restores_original_order_positions():
-    translator = WireCoordinateTranslator(FakeConverter(), map_id="WGS84")
-    wire_order = get_order()
-    map_order = translator.order_to_map(wire_order)
+def test_state_to_wgs84_round_trip_restores_original_order_positions():
+    translator = GeoCoordinateTranslator(FakeConverter(), map_id="WGS84")
+    wgs84_order = get_order()
+    map_order = translator.order_to_map(wgs84_order)
 
     state = OrderState(order_id="order_1")
     state.agv_position.position_initialized = True
@@ -232,67 +232,67 @@ def test_state_to_wire_round_trip_restores_original_order_positions():
     ]
     state.edge_states.append(edge_state)
 
-    wire_state = translator.state_to_wire(state)
+    wgs84_state = translator.state_to_wgs84(state)
 
-    assert wire_state.agv_position.x == pytest.approx(LON0 + 0.0001)
-    assert wire_state.agv_position.y == pytest.approx(LAT0)
-    assert wire_state.agv_position.theta == pytest.approx(0.0)
-    assert wire_state.agv_position.map_id == "WGS84"
+    assert wgs84_state.agv_position.x == pytest.approx(LON0 + 0.0001)
+    assert wgs84_state.agv_position.y == pytest.approx(LAT0)
+    assert wgs84_state.agv_position.theta == pytest.approx(0.0)
+    assert wgs84_state.agv_position.map_id == "WGS84"
 
-    wire_node = wire_order["nodes"][0]["node_position"]
-    assert wire_state.node_states[0].node_position.x == wire_node["x"]
-    assert wire_state.node_states[0].node_position.y == wire_node["y"]
-    assert wire_state.node_states[0].node_position.theta == 0.0
+    original_node = wgs84_order["nodes"][0]["node_position"]
+    assert wgs84_state.node_states[0].node_position.x == original_node["x"]
+    assert wgs84_state.node_states[0].node_position.y == original_node["y"]
+    assert wgs84_state.node_states[0].node_position.theta == 0.0
 
-    wire_cps = wire_order["edges"][0]["trajectory"]["control_points"]
-    assert wire_state.edge_states[0].trajectory.control_points[0].x == wire_cps[0]["x"]
-    assert wire_state.edge_states[0].trajectory.control_points[0].y == wire_cps[0]["y"]
+    original_cps = wgs84_order["edges"][0]["trajectory"]["control_points"]
+    assert wgs84_state.edge_states[0].trajectory.control_points[0].x == original_cps[0]["x"]
+    assert wgs84_state.edge_states[0].trajectory.control_points[0].y == original_cps[0]["y"]
 
     # Input message must not be modified.
     assert state.agv_position.map_id == "lidar_map"
 
 
-def test_state_to_wire_unknown_node_is_converted():
-    translator = WireCoordinateTranslator(FakeConverter())
+def test_state_to_wgs84_unknown_node_is_converted():
+    translator = GeoCoordinateTranslator(FakeConverter())
     state = OrderState(order_id="unknown")
     node_state = NodeState(node_id="n1", sequence_id=0)
     node_state.node_position.x = 10.0 * math.cos(MAP_YAW)
     node_state.node_position.y = -10.0 * math.sin(MAP_YAW)
     state.node_states.append(node_state)
 
-    wire_state = translator.state_to_wire(state)
+    wgs84_state = translator.state_to_wgs84(state)
 
-    assert wire_state.node_states[0].node_position.x == pytest.approx(LON0 + 0.0001)
-    assert wire_state.node_states[0].node_position.y == pytest.approx(LAT0)
-    assert wire_state.node_states[0].node_position.theta == pytest.approx(MAP_YAW)
+    assert wgs84_state.node_states[0].node_position.x == pytest.approx(LON0 + 0.0001)
+    assert wgs84_state.node_states[0].node_position.y == pytest.approx(LAT0)
+    assert wgs84_state.node_states[0].node_position.theta == pytest.approx(MAP_YAW)
 
 
-def test_state_to_wire_not_ready_reports_uninitialized_position():
-    translator = WireCoordinateTranslator(FakeConverter(ready=False))
+def test_state_to_wgs84_not_ready_reports_uninitialized_position():
+    translator = GeoCoordinateTranslator(FakeConverter(ready=False))
     state = OrderState()
     state.agv_position.position_initialized = True
     state.agv_position.localization_score = 0.9
     state.agv_position.x = 12.0
     state.agv_position.y = 34.0
 
-    wire_state = translator.state_to_wire(state)
+    wgs84_state = translator.state_to_wgs84(state)
 
-    assert not wire_state.agv_position.position_initialized
-    assert wire_state.agv_position.localization_score == 0.0
-    assert wire_state.agv_position.x == 0.0
-    assert wire_state.agv_position.y == 0.0
+    assert not wgs84_state.agv_position.position_initialized
+    assert wgs84_state.agv_position.localization_score == 0.0
+    assert wgs84_state.agv_position.x == 0.0
+    assert wgs84_state.agv_position.y == 0.0
 
 
-def test_visualization_to_wire():
-    translator = WireCoordinateTranslator(FakeConverter())
+def test_visualization_to_wgs84():
+    translator = GeoCoordinateTranslator(FakeConverter())
     visualization = Visualization()
     visualization.agv_position.position_initialized = True
     visualization.agv_position.x = 0.0
     visualization.agv_position.y = 0.0
     visualization.agv_position.theta = math.pi - 0.05
 
-    wire = translator.visualization_to_wire(visualization)
+    wgs84 = translator.visualization_to_wgs84(visualization)
 
-    assert wire.agv_position.x == pytest.approx(LON0)
-    assert wire.agv_position.y == pytest.approx(LAT0)
-    assert wire.agv_position.theta == pytest.approx(-math.pi + 0.05)
+    assert wgs84.agv_position.x == pytest.approx(LON0)
+    assert wgs84.agv_position.y == pytest.approx(LAT0)
+    assert wgs84.agv_position.theta == pytest.approx(-math.pi + 0.05)

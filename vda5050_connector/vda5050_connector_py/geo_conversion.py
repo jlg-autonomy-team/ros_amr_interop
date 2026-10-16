@@ -29,7 +29,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 """
-Translation of VDA5050 coordinates between a WGS84 wire format and the robot map frame.
+Translation of VDA5050 coordinates between WGS84 (MQTT side) and the robot map frame.
 
 In ``wgs84`` mode the fleet manager exchanges positions as:
 
@@ -172,16 +172,17 @@ class NavSatGeoConverter:
         return self._enu_to_map_yaw
 
 
-class WireCoordinateTranslator:
-    """Translates VDA5050 payload coordinates between the WGS84 wire format and the map frame."""
+class GeoCoordinateTranslator:
+    """Translates VDA5050 payload coordinates between WGS84 and the map frame."""
 
     def __init__(self, converter, map_id: str = "", logger=None):
         self._converter = converter
         self._map_id = map_id
         self._logger = logger
         self._lock = threading.Lock()
-        # order_id -> {"nodes": {(node_id, sequence_id): wire_position}, "edges": {...}}
-        self._wire_orders = OrderedDict()
+        # WGS84 positions as received from the fleet manager:
+        # order_id -> {"nodes": {(node_id, sequence_id): node_position}, "edges": {...}}
+        self._original_orders = OrderedDict()
 
     # Inbound (fleet manager -> robot)
 
@@ -203,11 +204,11 @@ class WireCoordinateTranslator:
             if edge.get("orientation_type") == "GLOBAL" and "orientation" in edge
         ]
 
-        wire_nodes = {
+        original_nodes = {
             (node["node_id"], node["sequence_id"]): copy.deepcopy(node.get("node_position"))
             for node in order.get("nodes", [])
         }
-        wire_edges = {
+        original_edges = {
             (edge["edge_id"], edge["sequence_id"]): copy.deepcopy(
                 edge.get("trajectory", {}).get("control_points")
             )
@@ -232,7 +233,7 @@ class WireCoordinateTranslator:
         for edge in global_edges:
             edge["orientation"] = normalize_angle(float(edge["orientation"]) + yaw)
 
-        self._remember_wire_order(order.get("order_id", ""), wire_nodes, wire_edges)
+        self._remember_original_order(order.get("order_id", ""), original_nodes, original_edges)
         return order
 
     def instant_actions_to_map(self, instant_actions: dict) -> dict:
@@ -258,42 +259,46 @@ class WireCoordinateTranslator:
 
     # Outbound (robot -> fleet manager)
 
-    def state_to_wire(self, state):
+    def state_to_wgs84(self, state):
         """Return a copy of an OrderState ROS message with WGS84 coordinates."""
         state = copy.deepcopy(state)
-        self._agv_position_to_wire(state.agv_position)
+        self._agv_position_to_wgs84(state.agv_position)
 
         with self._lock:
-            wire_order = self._wire_orders.get(state.order_id, {"nodes": {}, "edges": {}})
+            original_order = self._original_orders.get(
+                state.order_id, {"nodes": {}, "edges": {}}
+            )
 
         for node_state in state.node_states:
             key = (node_state.node_id, node_state.sequence_id)
-            if key in wire_order["nodes"]:
-                wire_position = wire_order["nodes"][key]
-                if wire_position is not None:
-                    node_state.node_position.x = float(wire_position["x"])
-                    node_state.node_position.y = float(wire_position["y"])
-                    node_state.node_position.theta = float(wire_position.get("theta", 0.0))
+            if key in original_order["nodes"]:
+                original_position = original_order["nodes"][key]
+                if original_position is not None:
+                    node_state.node_position.x = float(original_position["x"])
+                    node_state.node_position.y = float(original_position["y"])
+                    node_state.node_position.theta = float(original_position.get("theta", 0.0))
             else:
-                self._node_position_to_wire(node_state.node_position)
+                self._node_position_to_wgs84(node_state.node_position)
 
         for edge_state in state.edge_states:
             key = (edge_state.edge_id, edge_state.sequence_id)
-            if key in wire_order["edges"]:
-                wire_control_points = wire_order["edges"][key] or []
-                for cp, wire_cp in zip(edge_state.trajectory.control_points, wire_control_points):
-                    cp.x = float(wire_cp["x"])
-                    cp.y = float(wire_cp["y"])
+            if key in original_order["edges"]:
+                original_control_points = original_order["edges"][key] or []
+                for cp, original_cp in zip(
+                    edge_state.trajectory.control_points, original_control_points
+                ):
+                    cp.x = float(original_cp["x"])
+                    cp.y = float(original_cp["y"])
             else:
                 for cp in edge_state.trajectory.control_points:
-                    self._control_point_to_wire(cp)
+                    self._control_point_to_wgs84(cp)
 
         return state
 
-    def visualization_to_wire(self, visualization):
+    def visualization_to_wgs84(self, visualization):
         """Return a copy of a Visualization ROS message with WGS84 coordinates."""
         visualization = copy.deepcopy(visualization)
-        self._agv_position_to_wire(visualization.agv_position)
+        self._agv_position_to_wgs84(visualization.agv_position)
         return visualization
 
     # Helpers
@@ -302,14 +307,14 @@ class WireCoordinateTranslator:
         map_points, yaw = self._converter.lon_lat_to_map([(lon, lat)])
         return map_points[0], yaw
 
-    def _pose_to_wire(self, x: float, y: float, theta: float) -> tuple:
+    def _pose_to_wgs84(self, x: float, y: float, theta: float) -> tuple:
         lon, lat = self._converter.map_to_lon_lat(x, y)
         yaw = self._converter.enu_to_map_yaw(lon, lat)
         return lon, lat, normalize_angle(theta - yaw)
 
-    def _node_position_to_wire(self, position):
+    def _node_position_to_wgs84(self, position):
         try:
-            position.x, position.y, position.theta = self._pose_to_wire(
+            position.x, position.y, position.theta = self._pose_to_wgs84(
                 position.x, position.y, position.theta
             )
         except GeoConversionError as ex:
@@ -318,7 +323,7 @@ class WireCoordinateTranslator:
             position.y = 0.0
             position.theta = 0.0
 
-    def _control_point_to_wire(self, control_point):
+    def _control_point_to_wgs84(self, control_point):
         try:
             control_point.x, control_point.y = self._converter.map_to_lon_lat(
                 control_point.x, control_point.y
@@ -332,7 +337,7 @@ class WireCoordinateTranslator:
         if self._logger:
             self._logger.warning(message, throttle_duration_sec=5.0)
 
-    def _agv_position_to_wire(self, agv_position):
+    def _agv_position_to_wgs84(self, agv_position):
         if self._map_id:
             agv_position.map_id = self._map_id
 
@@ -343,7 +348,7 @@ class WireCoordinateTranslator:
             return
 
         try:
-            agv_position.x, agv_position.y, agv_position.theta = self._pose_to_wire(
+            agv_position.x, agv_position.y, agv_position.theta = self._pose_to_wgs84(
                 agv_position.x, agv_position.y, agv_position.theta
             )
         except GeoConversionError as ex:
@@ -355,11 +360,13 @@ class WireCoordinateTranslator:
             agv_position.y = 0.0
             agv_position.theta = 0.0
 
-    def _remember_wire_order(self, order_id: str, wire_nodes: dict, wire_edges: dict):
+    def _remember_original_order(self, order_id: str, nodes: dict, edges: dict):
         with self._lock:
-            wire_order = self._wire_orders.setdefault(order_id, {"nodes": {}, "edges": {}})
-            wire_order["nodes"].update(wire_nodes)
-            wire_order["edges"].update(wire_edges)
-            self._wire_orders.move_to_end(order_id)
-            while len(self._wire_orders) > _MAX_CACHED_ORDERS:
-                self._wire_orders.popitem(last=False)
+            original_order = self._original_orders.setdefault(
+                order_id, {"nodes": {}, "edges": {}}
+            )
+            original_order["nodes"].update(nodes)
+            original_order["edges"].update(edges)
+            self._original_orders.move_to_end(order_id)
+            while len(self._original_orders) > _MAX_CACHED_ORDERS:
+                self._original_orders.popitem(last=False)

@@ -32,6 +32,9 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import rclpy
+# JLG_CHANGES_START
+from rclpy.executors import MultiThreadedExecutor
+# JLG_CHANGES_END
 from vda5050_connector_py.mqtt_bridge import MQTTBridge
 
 
@@ -41,7 +44,15 @@ def main(args=None):
     mqtt_bridge = MQTTBridge()
 
     try:
-        rclpy.spin(mqtt_bridge)
+        # JLG_CHANGES_START
+        if mqtt_bridge.uses_geographic_coordinates:
+            # Coordinate conversions block on service calls inside subscription callbacks.
+            executor = MultiThreadedExecutor()
+            executor.add_node(mqtt_bridge)
+            executor.spin()
+        else:
+            rclpy.spin(mqtt_bridge)
+        # JLG_CHANGES_END
     except KeyboardInterrupt:
         pass
     except BaseException:

@@ -6,6 +6,12 @@ mqtt_bridge:
     mqtt_password: ""
     manufacturer_name: "robots"
     serial_number: "robot_1"
+    # "cartesian" (default): x/y [m], theta [rad] in the robot map frame.
+    # "wgs84": x=longitude, y=latitude [deg], theta=ENU yaw [rad] (0=East, CCW).
+    #   Requires robot_localization navsat_transform (fromLLArray/toLL services).
+    coordinate_system: "cartesian"
+    geo_map_id: "" # wgs84 only: overrides agvPosition.mapId when not empty
+    geo_service_timeout: 1.0 # [s]
 
 controller:
   ros__parameters:

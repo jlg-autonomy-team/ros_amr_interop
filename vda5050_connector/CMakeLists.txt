@@ -123,6 +123,7 @@ if(BUILD_TESTING)
 
   set(_pytest_tests
     test/test_vda5050_controller.py
+    test/test_geo_conversion.py
   )
   foreach(_test_path ${_pytest_tests})
     get_filename_component(_test_name ${_test_path} NAME_WE)

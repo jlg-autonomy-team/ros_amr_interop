@@ -58,6 +58,12 @@ from vda5050_connector_py.utils import json_camel_to_snake_case
 from vda5050_connector_py.utils import read_str_parameter, read_int_parameter
 # JLG_CHANGES_START
 from vda5050_connector_py.utils import read_bool_parameter
+from vda5050_connector_py.utils import read_double_parameter
+from vda5050_connector_py.geo_conversion import COORDINATE_SYSTEM_CARTESIAN
+from vda5050_connector_py.geo_conversion import COORDINATE_SYSTEM_WGS84
+from vda5050_connector_py.geo_conversion import SUPPORTED_COORDINATE_SYSTEMS
+from vda5050_connector_py.geo_conversion import NavSatGeoConverter
+from vda5050_connector_py.geo_conversion import WireCoordinateTranslator
 # JLG_CHANGES_END
 from vda5050_connector_py.utils import convert_ros_message_to_json
 from vda5050_connector_py.utils import get_vda5050_ts
@@ -284,9 +290,38 @@ class MQTTBridge(Node):
         self.broker_comm_loss_dtc = read_int_parameter(
             self, "broker_comm_loss_dtc", 2456
         )
+
+        # Coordinate system used on the VDA5050 wire: "cartesian" (map frame, meters) or
+        # "wgs84" (x=longitude, y=latitude [deg], theta=ENU yaw [rad]).
+        self.coordinate_system = read_str_parameter(
+            self, "coordinate_system", COORDINATE_SYSTEM_CARTESIAN
+        ).lower()
+        if self.coordinate_system not in SUPPORTED_COORDINATE_SYSTEMS:
+            raise ValueError(
+                f"Invalid coordinate_system '{self.coordinate_system}'. "
+                f"Supported values are: {SUPPORTED_COORDINATE_SYSTEMS}"
+            )
+        self.geo_map_id = read_str_parameter(self, "geo_map_id", "")
+        self.geo_service_timeout = read_double_parameter(self, "geo_service_timeout", 1.0)
         # JLG_CHANGES_END
 
         self.configure()
+
+    # JLG_CHANGES_START
+    @property
+    def uses_geographic_coordinates(self) -> bool:
+        return self.coordinate_system == COORDINATE_SYSTEM_WGS84
+
+    def _order_to_map(self, order: dict) -> dict:
+        if self._wire_translator is None:
+            return order
+        return self._wire_translator.order_to_map(order)
+
+    def _instant_actions_to_map(self, instant_actions: dict) -> dict:
+        if self._wire_translator is None:
+            return instant_actions
+        return self._wire_translator.instant_actions_to_map(instant_actions)
+    # JLG_CHANGES_END
 
     def configure(self):
         # Configure MQTT
@@ -365,6 +400,18 @@ class MQTTBridge(Node):
         self.dtc_force_latch_client = self.create_client(
             DTCUnlatch, "diagnostics/force_latch_dtc"
         )
+
+        # Must exist before MQTT messages can arrive.
+        self._wire_translator = None
+        if self.uses_geographic_coordinates:
+            self._wire_translator = WireCoordinateTranslator(
+                converter=NavSatGeoConverter(node=self, timeout_sec=self.geo_service_timeout),
+                map_id=self.geo_map_id,
+                logger=self.logger,
+            )
+            self.logger.info(
+                "VDA5050 coordinates on the wire are WGS84 (x=longitude, y=latitude)"
+            )
         # JLG_CHANGES_END
 
         # Connect to MQTT broker
@@ -459,7 +506,9 @@ class MQTTBridge(Node):
                         self.call_dtc_force_latch(self.invalid_order_dtc)
                         return
                     self.logger.info("✅ Valid VDA5050 order message")
-                    vda_order_msg = VDAOrder(**generate_vda_order_msg(msg_json))
+                    vda_order_msg = VDAOrder(
+                        **generate_vda_order_msg(self._order_to_map(msg_json))
+                    )
                     self._order_pub.publish(msg=vda_order_msg)
                 if msg.topic.endswith("instantActions"):
                     instant_actions_validation = validate_vda5050_payload(
@@ -473,7 +522,9 @@ class MQTTBridge(Node):
                         return
                     self.logger.info("✅ Valid VDA5050 instantActions message")
                     vda_instant_actions_message = VDAInstantActions(
-                        **generate_vda_instant_action_msg(msg_json)
+                        **generate_vda_instant_action_msg(
+                            self._instant_actions_to_map(msg_json)
+                        )
                     )
                     self._instant_actions_pub.publish(msg=vda_instant_actions_message)
             except Exception as ex:
@@ -486,11 +537,15 @@ class MQTTBridge(Node):
         else:
             try:
                 if msg.topic.endswith("order"):
-                    vda_order_msg = VDAOrder(**generate_vda_order_msg(msg_json))
+                    vda_order_msg = VDAOrder(
+                        **generate_vda_order_msg(self._order_to_map(msg_json))
+                    )
                     self._order_pub.publish(msg=vda_order_msg)
                 if msg.topic.endswith("instantActions"):
                     vda_instant_actions_message = VDAInstantActions(
-                        **generate_vda_instant_action_msg(msg_json)
+                        **generate_vda_instant_action_msg(
+                            self._instant_actions_to_map(msg_json)
+                        )
                     )
                     self._instant_actions_pub.publish(msg=vda_instant_actions_message)
             # JLG_CHANGES_START
@@ -668,6 +723,10 @@ class MQTTBridge(Node):
             msg (VDAOrderState): VDA5050 ROS2 OrderState message.
 
         """
+        # JLG_CHANGES_START
+        if self._wire_translator is not None:
+            msg = self._wire_translator.state_to_wire(msg)
+        # JLG_CHANGES_END
         topic = get_vda5050_mqtt_topic(
             manufacturer=self._manufacturer_name,
             serial_number=self._serial_number,
@@ -710,6 +769,10 @@ class MQTTBridge(Node):
             msg (VDAVisualization): VDA5050 ROS2 Visualization message.
 
         """
+        # JLG_CHANGES_START
+        if self._wire_translator is not None:
+            msg = self._wire_translator.visualization_to_wire(msg)
+        # JLG_CHANGES_END
         topic = get_vda5050_mqtt_topic(
             manufacturer=self._manufacturer_name,
             serial_number=self._serial_number,

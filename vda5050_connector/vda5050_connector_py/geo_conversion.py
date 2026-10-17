@@ -148,6 +148,8 @@ class NavSatGeoConverter:
         count = len(lon_lats)
         poses = []
         for origin, north in zip(response.map_points[:count], response.map_points[count:]):
+            if not all(math.isfinite(v) for v in (origin.x, origin.y, north.x, north.y)):
+                raise GeoConversionError("fromLLArray returned non-finite map coordinates")
             dx = north.x - origin.x
             dy = north.y - origin.y
             if math.hypot(dx, dy) < _MIN_PROBE_DISTANCE_M:

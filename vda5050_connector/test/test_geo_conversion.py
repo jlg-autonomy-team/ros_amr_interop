@@ -539,6 +539,19 @@ def test_lon_lat_to_map_raises_when_navsat_not_ready(response):
         converter.lon_lat_to_map([(LON0, LAT0)])
 
 
+@pytest.mark.parametrize("bad_value", [math.nan, math.inf], ids=["nan", "inf"])
+@pytest.mark.parametrize("bad_index", [0, 1], ids=["origin", "probe"])
+def test_lon_lat_to_map_rejects_non_finite_response(bad_value, bad_index):
+    points = [SimpleNamespace(x=0.0, y=0.0, z=0.0), SimpleNamespace(x=0.0, y=10.0, z=0.0)]
+    points[bad_index].x = bad_value
+    converter = make_navsat_converter(
+        FakeClient(respond=lambda request: SimpleNamespace(map_points=points))
+    )
+
+    with pytest.raises(GeoConversionError, match="non-finite"):
+        converter.lon_lat_to_map([(LON0, LAT0)])
+
+
 def test_lon_lat_to_map_rejects_invalid_coordinates_without_calling_service():
     client = FakeClient(respond=planar_from_ll_array)
 

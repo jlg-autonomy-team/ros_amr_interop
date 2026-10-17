@@ -155,38 +155,61 @@ def test_order_to_map_converts_positions_and_headings():
     assert original == get_order()
 
 
+def make_node(node_id, sequence_id, lon):
+    return {
+        "node_id": node_id,
+        "sequence_id": sequence_id,
+        "released": True,
+        "node_position": {"x": lon, "y": LAT0, "theta": 1.0, "map_id": "WGS84"},
+        "actions": [],
+    }
+
+
+def make_edge(edge_id, sequence_id, start_node_id, end_node_id, control_point_lons=()):
+    edge = {
+        "edge_id": edge_id,
+        "sequence_id": sequence_id,
+        "released": True,
+        "start_node_id": start_node_id,
+        "end_node_id": end_node_id,
+        "actions": [],
+    }
+    if control_point_lons:
+        edge["trajectory"] = {
+            "degree": 1,
+            "knot_vector": [0, 0, 1, 1],
+            "control_points": [{"x": lon, "y": LAT0} for lon in control_point_lons],
+        }
+    return edge
+
+
+def make_order(order_id, order_update_id, nodes, edges):
+    return {
+        "order_id": order_id,
+        "order_update_id": order_update_id,
+        "nodes": nodes,
+        "edges": edges,
+    }
+
+
+def make_state(order_id, order_update_id, node_keys=(), edge_keys=()):
+    state = OrderState(order_id=order_id, order_update_id=order_update_id)
+    state.node_states = [NodeState(node_id=n, sequence_id=s) for n, s in node_keys]
+    state.edge_states = [EdgeState(edge_id=e, sequence_id=s) for e, s in edge_keys]
+    for edge_state in state.edge_states:
+        edge_state.trajectory.control_points = [ControlPoint(), ControlPoint()]
+    return state
+
+
 def test_order_update_converts_stitch_node_identically():
-    def node(node_id, sequence_id, lon):
-        return {
-            "node_id": node_id,
-            "sequence_id": sequence_id,
-            "released": True,
-            "node_position": {"x": lon, "y": LAT0, "theta": 1.0, "map_id": "WGS84"},
-            "actions": [],
-        }
-
-    def edge(edge_id, sequence_id, start_node_id, end_node_id):
-        return {
-            "edge_id": edge_id,
-            "sequence_id": sequence_id,
-            "released": True,
-            "start_node_id": start_node_id,
-            "end_node_id": end_node_id,
-            "actions": [],
-        }
-
-    base = {
-        "order_id": "order_1",
-        "order_update_id": 0,
-        "nodes": [node("A", 0, LON0), node("B", 2, LON0 + 0.001)],
-        "edges": [edge("e1", 1, "A", "B")],
-    }
-    update = {
-        "order_id": "order_1",
-        "order_update_id": 1,
-        "nodes": [node("B", 2, LON0 + 0.001), node("C", 4, LON0 + 0.002)],
-        "edges": [edge("e2", 3, "B", "C")],
-    }
+    base = make_order(
+        "order_1", 0, [make_node("A", 0, LON0), make_node("B", 2, LON0 + 0.001)],
+        [make_edge("e1", 1, "A", "B")],
+    )
+    update = make_order(
+        "order_1", 1, [make_node("B", 2, LON0 + 0.001), make_node("C", 4, LON0 + 0.002)],
+        [make_edge("e2", 3, "B", "C")],
+    )
     translator = GeoCoordinateTranslator(FakeConverter())
 
     base_b = translator.order_to_map(base)["nodes"][1]["node_position"]
@@ -194,6 +217,140 @@ def test_order_update_converts_stitch_node_identically():
 
     # The controller's stitching check compares node positions exactly.
     assert update_b == base_b
+
+
+# In the state tests below the converter is disabled after the orders are translated, so a
+# reported coordinate can only come from a stored original (fallback conversion yields zeros).
+
+
+def test_rejected_stitch_update_does_not_replace_accepted_positions():
+    converter = FakeConverter()
+    translator = GeoCoordinateTranslator(converter)
+    translator.order_to_map(make_order(
+        "o", 0, [make_node("A", 0, LON0), make_node("B", 2, LON0 + 0.001)],
+        [make_edge("e1", 1, "A", "B")],
+    ))
+    translator.state_to_wgs84(make_state("o", 0))
+    # Moved stitch node: the controller rejects this update.
+    translator.order_to_map(make_order(
+        "o", 1, [make_node("B", 2, LON0 + 0.0011), make_node("C", 4, LON0 + 0.002)],
+        [make_edge("e2", 3, "B", "C")],
+    ))
+    converter.ready = False
+
+    state = translator.state_to_wgs84(make_state("o", 0, [("B", 2)]))
+
+    assert state.node_states[0].node_position.x == LON0 + 0.001
+
+
+def test_corrected_update_with_same_id_is_used_once_accepted():
+    converter = FakeConverter()
+    translator = GeoCoordinateTranslator(converter)
+    translator.order_to_map(make_order(
+        "o", 0, [make_node("A", 0, LON0), make_node("B", 2, LON0 + 0.001)],
+        [make_edge("e1", 1, "A", "B")],
+    ))
+    translator.state_to_wgs84(make_state("o", 0))
+    translator.order_to_map(make_order(
+        "o", 1, [make_node("B", 2, LON0 + 0.0011), make_node("C", 4, LON0 + 0.003)],
+        [make_edge("e2", 3, "B", "C")],
+    ))
+    translator.order_to_map(make_order(
+        "o", 1, [make_node("B", 2, LON0 + 0.001), make_node("C", 4, LON0 + 0.002)],
+        [make_edge("e2", 3, "B", "C")],
+    ))
+    converter.ready = False
+
+    state = translator.state_to_wgs84(make_state("o", 1, [("B", 2), ("C", 4)]))
+
+    assert state.node_states[0].node_position.x == LON0 + 0.001
+    assert state.node_states[1].node_position.x == LON0 + 0.002
+
+
+def test_stale_update_does_not_replace_accepted_positions():
+    converter = FakeConverter()
+    translator = GeoCoordinateTranslator(converter)
+    translator.order_to_map(make_order(
+        "o", 2, [make_node("A", 0, LON0), make_node("H", 2, LON0 + 0.001)],
+        [make_edge("e1", 1, "A", "H")],
+    ))
+    translator.state_to_wgs84(make_state("o", 2))
+    translator.order_to_map(make_order(
+        "o", 1, [make_node("A", 0, LON0), make_node("H", 2, LON0 + 0.005)],
+        [make_edge("e1", 1, "A", "H")],
+    ))
+    converter.ready = False
+
+    state = translator.state_to_wgs84(make_state("o", 2, [("H", 2)]))
+
+    assert state.node_states[0].node_position.x == LON0 + 0.001
+
+
+def test_duplicate_update_id_does_not_replace_accepted_positions():
+    converter = FakeConverter()
+    translator = GeoCoordinateTranslator(converter)
+    translator.order_to_map(make_order(
+        "o", 1, [make_node("A", 0, LON0), make_node("B", 2, LON0 + 0.001)],
+        [make_edge("e1", 1, "A", "B")],
+    ))
+    translator.state_to_wgs84(make_state("o", 1))
+    translator.order_to_map(make_order(
+        "o", 1, [make_node("A", 0, LON0), make_node("B", 2, LON0 + 0.005)],
+        [make_edge("e1", 1, "A", "B")],
+    ))
+    converter.ready = False
+
+    state = translator.state_to_wgs84(make_state("o", 1, [("B", 2)]))
+
+    assert state.node_states[0].node_position.x == LON0 + 0.001
+
+
+def test_rejected_new_orders_do_not_evict_active_order():
+    converter = FakeConverter()
+    translator = GeoCoordinateTranslator(converter)
+    translator.order_to_map(make_order(
+        "active", 0, [make_node("A", 0, LON0), make_node("B", 2, LON0 + 0.001)],
+        [make_edge("e1", 1, "A", "B")],
+    ))
+    translator.state_to_wgs84(make_state("active", 0))
+    for i in range(10):
+        translator.order_to_map(make_order(
+            f"rejected_{i}", 0, [make_node("B", 0, LON0 + 0.004)], [],
+        ))
+    converter.ready = False
+
+    state = translator.state_to_wgs84(make_state("active", 0, [("B", 2)]))
+
+    assert state.node_states[0].node_position.x == LON0 + 0.001
+
+
+def test_stitched_base_entries_are_preserved():
+    converter = FakeConverter()
+    translator = GeoCoordinateTranslator(converter)
+    translator.order_to_map(make_order(
+        "o", 0, [make_node("A", 0, LON0), make_node("B", 2, LON0 + 0.001)],
+        [make_edge("e1", 1, "A", "B", (LON0, LON0 + 0.001))],
+    ))
+    translator.state_to_wgs84(make_state("o", 0))
+    translator.order_to_map(make_order(
+        "o", 1, [make_node("B", 2, LON0 + 0.001), make_node("C", 4, LON0 + 0.002)],
+        [make_edge("e2", 3, "B", "C", (LON0 + 0.001, LON0 + 0.002))],
+    ))
+    converter.ready = False
+
+    state = translator.state_to_wgs84(
+        make_state("o", 1, [("A", 0), ("B", 2), ("C", 4)], [("e1", 1), ("e2", 3)])
+    )
+
+    assert [n.node_position.x for n in state.node_states] == [
+        LON0, LON0 + 0.001, LON0 + 0.002
+    ]
+    assert [cp.x for cp in state.edge_states[0].trajectory.control_points] == [
+        LON0, LON0 + 0.001
+    ]
+    assert [cp.x for cp in state.edge_states[1].trajectory.control_points] == [
+        LON0 + 0.001, LON0 + 0.002
+    ]
 
 
 def test_order_to_map_rejects_global_edge_without_start_node_position():

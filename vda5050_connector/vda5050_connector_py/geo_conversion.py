@@ -60,7 +60,7 @@ INIT_POSITION_ACTION = "initPosition"
 # Roughly 11 m north; used to measure the map-frame direction of true north.
 _NORTH_PROBE_DEG = 1e-4
 _MIN_PROBE_DISTANCE_M = 1.0
-_MAX_CACHED_ORDERS = 2
+_MAX_PENDING_ORDERS = 4
 
 
 class GeoConversionError(Exception):
@@ -184,9 +184,12 @@ class GeoCoordinateTranslator:
         self._map_id = map_id
         self._logger = logger
         self._lock = threading.Lock()
-        # WGS84 positions as received from the fleet manager:
-        # order_id -> {"nodes": {(node_id, sequence_id): node_position}, "edges": {...}}
-        self._original_orders = OrderedDict()
+        # WGS84 positions as received from the fleet manager, as snapshots:
+        # {"nodes": {(node_id, sequence_id): node_position}, "edges": {...}}.
+        # Orders wait in pending until a state shows the controller accepted them.
+        self._pending_orders = OrderedDict()  # (order_id, order_update_id) -> snapshot
+        self._accepted_key = None
+        self._accepted_order = {"nodes": {}, "edges": {}}
 
     # Inbound (fleet manager -> robot)
 
@@ -245,7 +248,10 @@ class GeoCoordinateTranslator:
         for element in order.get("nodes", []) + order.get("edges", []):
             self._init_position_actions_to_map(element.get("actions", []))
 
-        self._remember_original_order(order.get("order_id", ""), original_nodes, original_edges)
+        self._remember_pending_order(
+            (order.get("order_id", ""), order.get("order_update_id", 0)),
+            {"nodes": original_nodes, "edges": original_edges},
+        )
         return order
 
     def instant_actions_to_map(self, instant_actions: dict) -> dict:
@@ -277,10 +283,7 @@ class GeoCoordinateTranslator:
         state = copy.deepcopy(state)
         self._agv_position_to_wgs84(state.agv_position)
 
-        with self._lock:
-            original_order = self._original_orders.get(
-                state.order_id, {"nodes": {}, "edges": {}}
-            )
+        original_order = self._accepted_snapshot(state.order_id, state.order_update_id)
 
         for node_state in state.node_states:
             key = (node_state.node_id, node_state.sequence_id)
@@ -373,13 +376,31 @@ class GeoCoordinateTranslator:
             agv_position.y = 0.0
             agv_position.theta = 0.0
 
-    def _remember_original_order(self, order_id: str, nodes: dict, edges: dict):
+    def _remember_pending_order(self, key: tuple, snapshot: dict):
         with self._lock:
-            original_order = self._original_orders.setdefault(
-                order_id, {"nodes": {}, "edges": {}}
-            )
-            original_order["nodes"].update(nodes)
-            original_order["edges"].update(edges)
-            self._original_orders.move_to_end(order_id)
-            while len(self._original_orders) > _MAX_CACHED_ORDERS:
-                self._original_orders.popitem(last=False)
+            accepted = self._accepted_key
+            # The controller discards or rejects update ids at or below the accepted one.
+            if accepted and key[0] == accepted[0] and key[1] <= accepted[1]:
+                return
+            self._pending_orders.pop(key, None)
+            self._pending_orders[key] = snapshot
+            while len(self._pending_orders) > _MAX_PENDING_ORDERS:
+                self._pending_orders.popitem(last=False)
+
+    def _accepted_snapshot(self, order_id: str, order_update_id: int) -> dict:
+        key = (order_id, order_update_id)
+        with self._lock:
+            if key != self._accepted_key:
+                if self._accepted_key is None or order_id != self._accepted_key[0]:
+                    self._accepted_order = {"nodes": {}, "edges": {}}
+                # Merge so stitched base entries from earlier updates are kept.
+                snapshot = self._pending_orders.pop(key, None)
+                if snapshot:
+                    self._accepted_order["nodes"].update(snapshot["nodes"])
+                    self._accepted_order["edges"].update(snapshot["edges"])
+                self._accepted_key = key
+                for stale_key in [
+                    k for k in self._pending_orders if k[0] == order_id and k[1] <= order_update_id
+                ]:
+                    del self._pending_orders[stale_key]
+            return self._accepted_order

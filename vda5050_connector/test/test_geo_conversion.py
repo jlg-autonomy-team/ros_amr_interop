@@ -45,6 +45,12 @@ LAT0 = 39.439381
 METERS_PER_DEG = 100000.0
 # Map axes rotated 0.1 rad counter-clockwise from ENU.
 MAP_YAW = 0.1
+# Exaggerated stand-in for UTM grid convergence, which varies with longitude.
+CONVERGENCE_PER_DEG = 0.5
+
+
+def fake_enu_to_map_yaw(lon, lat):
+    return -MAP_YAW - CONVERGENCE_PER_DEG * (lon - LON0)
 
 
 class FakeConverter:
@@ -56,13 +62,13 @@ class FakeConverter:
     def lon_lat_to_map(self, lon_lats):
         if not self.ready:
             raise GeoConversionError("not ready")
-        points = []
+        poses = []
         for lon, lat in lon_lats:
             e = (lon - LON0) * METERS_PER_DEG
             n = (lat - LAT0) * METERS_PER_DEG
             c, s = math.cos(-MAP_YAW), math.sin(-MAP_YAW)
-            points.append((c * e - s * n, s * e + c * n))
-        return points, -MAP_YAW
+            poses.append((c * e - s * n, s * e + c * n, fake_enu_to_map_yaw(lon, lat)))
+        return poses
 
     def map_to_lon_lat(self, x, y):
         if not self.ready:
@@ -72,7 +78,7 @@ class FakeConverter:
         return LON0 + e / METERS_PER_DEG, LAT0 + n / METERS_PER_DEG
 
     def enu_to_map_yaw(self, lon, lat):
-        return -MAP_YAW
+        return fake_enu_to_map_yaw(lon, lat)
 
 
 def get_order():
@@ -127,13 +133,14 @@ def get_order():
 def test_order_to_map_converts_positions_and_headings():
     translator = GeoCoordinateTranslator(FakeConverter())
     original = get_order()
+    n1_yaw = fake_enu_to_map_yaw(LON0 + 0.0001, LAT0)
 
     order = translator.order_to_map(original)
 
     position = order["nodes"][0]["node_position"]
     assert position["x"] == pytest.approx(10.0 * math.cos(MAP_YAW))
     assert position["y"] == pytest.approx(-10.0 * math.sin(MAP_YAW))
-    assert position["theta"] == pytest.approx(-MAP_YAW)
+    assert position["theta"] == pytest.approx(n1_yaw)
     assert position["allowed_deviation_x_y"] == 0.5
     assert "node_position" not in order["nodes"][1]
 
@@ -141,10 +148,60 @@ def test_order_to_map_converts_positions_and_headings():
     assert cp["x"] == pytest.approx(10.0 * math.sin(MAP_YAW))
     assert cp["y"] == pytest.approx(10.0 * math.cos(MAP_YAW))
     assert cp["weight"] == 1.0
-    assert order["edges"][0]["orientation"] == pytest.approx(0.5 - MAP_YAW)
+    # GLOBAL edge orientation uses the yaw offset at its start node.
+    assert order["edges"][0]["orientation"] == pytest.approx(0.5 + n1_yaw)
     assert order["edges"][0]["length"] == 12
 
     assert original == get_order()
+
+
+def test_order_update_converts_stitch_node_identically():
+    def node(node_id, sequence_id, lon):
+        return {
+            "node_id": node_id,
+            "sequence_id": sequence_id,
+            "released": True,
+            "node_position": {"x": lon, "y": LAT0, "theta": 1.0, "map_id": "WGS84"},
+            "actions": [],
+        }
+
+    def edge(edge_id, sequence_id, start_node_id, end_node_id):
+        return {
+            "edge_id": edge_id,
+            "sequence_id": sequence_id,
+            "released": True,
+            "start_node_id": start_node_id,
+            "end_node_id": end_node_id,
+            "actions": [],
+        }
+
+    base = {
+        "order_id": "order_1",
+        "order_update_id": 0,
+        "nodes": [node("A", 0, LON0), node("B", 2, LON0 + 0.001)],
+        "edges": [edge("e1", 1, "A", "B")],
+    }
+    update = {
+        "order_id": "order_1",
+        "order_update_id": 1,
+        "nodes": [node("B", 2, LON0 + 0.001), node("C", 4, LON0 + 0.002)],
+        "edges": [edge("e2", 3, "B", "C")],
+    }
+    translator = GeoCoordinateTranslator(FakeConverter())
+
+    base_b = translator.order_to_map(base)["nodes"][1]["node_position"]
+    update_b = translator.order_to_map(update)["nodes"][0]["node_position"]
+
+    # The controller's stitching check compares node positions exactly.
+    assert update_b == base_b
+
+
+def test_order_to_map_rejects_global_edge_without_start_node_position():
+    order = get_order()
+    del order["nodes"][0]["node_position"]
+
+    with pytest.raises(GeoConversionError):
+        GeoCoordinateTranslator(FakeConverter()).order_to_map(order)
 
 
 def test_order_to_map_tangential_orientation_unchanged():
@@ -194,7 +251,7 @@ def test_order_to_map_converts_embedded_init_position_actions():
         params = {p["key"]: p["value"] for p in action["action_parameters"]}
         assert params["x"] == pytest.approx(10.0 * math.cos(MAP_YAW))
         assert params["y"] == pytest.approx(-10.0 * math.sin(MAP_YAW))
-        assert params["theta"] == pytest.approx(1.0 - MAP_YAW)
+        assert params["theta"] == pytest.approx(1.0 + fake_enu_to_map_yaw(LON0 + 0.0001, LAT0))
 
 
 def test_instant_actions_init_position_to_map():
@@ -227,7 +284,7 @@ def test_instant_actions_init_position_to_map():
     params = {p["key"]: p["value"] for p in converted["actions"][0]["action_parameters"]}
     assert params["x"] == pytest.approx(10.0 * math.cos(MAP_YAW))
     assert params["y"] == pytest.approx(-10.0 * math.sin(MAP_YAW))
-    assert params["theta"] == pytest.approx(1.0 - MAP_YAW)
+    assert params["theta"] == pytest.approx(1.0 + fake_enu_to_map_yaw(LON0 + 0.0001, LAT0))
     assert params["mapId"] == "WGS84"
     assert converted["actions"][1] == instant_actions["actions"][1]
 
@@ -262,7 +319,9 @@ def test_state_to_wgs84_round_trip_restores_original_order_positions():
 
     assert wgs84_state.agv_position.x == pytest.approx(LON0 + 0.0001)
     assert wgs84_state.agv_position.y == pytest.approx(LAT0)
-    assert wgs84_state.agv_position.theta == pytest.approx(0.0)
+    assert wgs84_state.agv_position.theta == pytest.approx(
+        -MAP_YAW - fake_enu_to_map_yaw(LON0 + 0.0001, LAT0)
+    )
     assert wgs84_state.agv_position.map_id == "WGS84"
 
     original_node = wgs84_order["nodes"][0]["node_position"]
@@ -290,7 +349,9 @@ def test_state_to_wgs84_unknown_node_is_converted():
 
     assert wgs84_state.node_states[0].node_position.x == pytest.approx(LON0 + 0.0001)
     assert wgs84_state.node_states[0].node_position.y == pytest.approx(LAT0)
-    assert wgs84_state.node_states[0].node_position.theta == pytest.approx(MAP_YAW)
+    assert wgs84_state.node_states[0].node_position.theta == pytest.approx(
+        -fake_enu_to_map_yaw(LON0 + 0.0001, LAT0)
+    )
 
 
 def test_state_to_wgs84_not_ready_reports_uninitialized_position():

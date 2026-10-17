@@ -119,42 +119,46 @@ class NavSatGeoConverter:
             raise GeoConversionError(f"Service '{client.srv_name}' call failed")
         return result
 
-    def lon_lat_to_map(self, lon_lats: list) -> tuple:
+    def lon_lat_to_map(self, lon_lats: list) -> list:
         """
-        Convert (lon, lat) pairs to map (x, y).
+        Convert (lon, lat) pairs to the map frame.
 
         Returns
         -------
-            Tuple of the converted points and the ENU->map yaw offset [rad] at the first point.
+            One (x, y, enu_to_map_yaw) tuple per point. The yaw offset [rad] is measured at
+            that point, so a location always converts to the same heading.
 
         """
         for lon, lat in lon_lats:
             _validate_lon_lat(lon, lat)
 
-        lon0, lat0 = lon_lats[0]
         request = self._from_ll_array_type.Request()
         request.ll_points = [
             self._geo_point_type(latitude=lat, longitude=lon, altitude=0.0)
             for lon, lat in lon_lats
+        ] + [
+            self._geo_point_type(latitude=lat + _NORTH_PROBE_DEG, longitude=lon, altitude=0.0)
+            for lon, lat in lon_lats
         ]
-        request.ll_points.append(
-            self._geo_point_type(latitude=lat0 + _NORTH_PROBE_DEG, longitude=lon0, altitude=0.0)
-        )
 
         response = self._call(self._from_ll_array_client, request)
         # navsat_transform answers with an empty array (or zeros) until its transform is ready.
         if len(response.map_points) != len(request.ll_points):
             raise GeoConversionError("navsat_transform is not ready (datum/transform unavailable)")
 
-        origin = response.map_points[0]
-        north = response.map_points[-1]
-        dx = north.x - origin.x
-        dy = north.y - origin.y
-        if math.hypot(dx, dy) < _MIN_PROBE_DISTANCE_M:
-            raise GeoConversionError("navsat_transform is not ready (datum/transform unavailable)")
+        count = len(lon_lats)
+        poses = []
+        for origin, north in zip(response.map_points[:count], response.map_points[count:]):
+            dx = north.x - origin.x
+            dy = north.y - origin.y
+            if math.hypot(dx, dy) < _MIN_PROBE_DISTANCE_M:
+                raise GeoConversionError(
+                    "navsat_transform is not ready (datum/transform unavailable)"
+                )
+            poses.append((origin.x, origin.y, normalize_angle(math.atan2(dy, dx) - math.pi / 2.0)))
 
-        self._enu_to_map_yaw = normalize_angle(math.atan2(dy, dx) - math.pi / 2.0)
-        return [(p.x, p.y) for p in response.map_points[:-1]], self._enu_to_map_yaw
+        self._enu_to_map_yaw = poses[0][2]
+        return poses
 
     def map_to_lon_lat(self, x: float, y: float) -> tuple:
         """Convert a map (x, y) point to (lon, lat)."""
@@ -190,9 +194,8 @@ class GeoCoordinateTranslator:
         """Convert a snake_case order dict from WGS84 to the map frame."""
         order = copy.deepcopy(order)
 
-        node_positions = [
-            node["node_position"] for node in order.get("nodes", []) if "node_position" in node
-        ]
+        positioned_nodes = [node for node in order.get("nodes", []) if "node_position" in node]
+        node_positions = [node["node_position"] for node in positioned_nodes]
         control_points = [
             cp
             for edge in order.get("edges", [])
@@ -216,21 +219,27 @@ class GeoCoordinateTranslator:
         }
 
         points = node_positions + control_points
+        node_yaws = {}
         if points:
-            lon_lats = [(float(p["x"]), float(p["y"])) for p in points]
-            map_points, yaw = self._converter.lon_lat_to_map(lon_lats)
-            for point, (x, y) in zip(points, map_points):
+            map_poses = self._converter.lon_lat_to_map(
+                [(float(p["x"]), float(p["y"])) for p in points]
+            )
+            for point, (x, y, _) in zip(points, map_poses):
                 point["x"] = x
                 point["y"] = y
-            for position in node_positions:
+            for node, (_, _, yaw) in zip(positioned_nodes, map_poses):
+                node_yaws[node["node_id"]] = yaw
+                position = node["node_position"]
                 if "theta" in position:
                     position["theta"] = normalize_angle(float(position["theta"]) + yaw)
-        elif global_edges:
-            raise GeoConversionError(
-                "Cannot convert GLOBAL edge orientation without any node position"
-            )
 
         for edge in global_edges:
+            if edge["start_node_id"] not in node_yaws:
+                raise GeoConversionError(
+                    f"Cannot convert GLOBAL orientation of edge '{edge['edge_id']}' "
+                    "without a start node position"
+                )
+            yaw = node_yaws[edge["start_node_id"]]
             edge["orientation"] = normalize_angle(float(edge["orientation"]) + yaw)
 
         for element in order.get("nodes", []) + order.get("edges", []):
@@ -308,8 +317,8 @@ class GeoCoordinateTranslator:
     # Helpers
 
     def _lon_lat_to_map_single(self, lon: float, lat: float) -> tuple:
-        map_points, yaw = self._converter.lon_lat_to_map([(lon, lat)])
-        return map_points[0], yaw
+        x, y, yaw = self._converter.lon_lat_to_map([(lon, lat)])[0]
+        return (x, y), yaw
 
     def _pose_to_wgs84(self, x: float, y: float, theta: float) -> tuple:
         lon, lat = self._converter.map_to_lon_lat(x, y)

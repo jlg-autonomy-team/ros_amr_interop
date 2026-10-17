@@ -49,8 +49,9 @@ def main(args=None):
     try:
         # JLG_CHANGES_START
         if mqtt_bridge.uses_geographic_coordinates:
-            # Coordinate conversions block on service calls inside subscription callbacks.
-            executor = MultiThreadedExecutor()
+            # Coordinate conversions block on service calls inside subscription callbacks;
+            # a second worker must stay free to process the service response.
+            executor = MultiThreadedExecutor(num_threads=2)
             executor.add_node(mqtt_bridge)
             executor.spin()
         else:

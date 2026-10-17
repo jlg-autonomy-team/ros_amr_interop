@@ -38,6 +38,9 @@ import pytest
 import json
 
 from vda5050_connector_py.utils import get_vda5050_ts
+from vda5050_connector_py import mqtt_bridge as mqtt_bridge_module
+from vda5050_connector_py.geo_conversion import GeoConversionError
+from vda5050_connector_py.geo_conversion import _validate_lon_lat
 from vda5050_connector_py.mqtt_bridge import generate_vda_order_msg
 from vda5050_connector_py.mqtt_bridge import generate_vda_instant_action_msg
 from vda5050_connector_py.mqtt_bridge import MQTTBridge
@@ -51,6 +54,7 @@ from vda5050_msgs.msg import Action
 from vda5050_msgs.msg import Connection
 from vda5050_msgs.msg import Visualization
 from vda5050_msgs.msg import InstantActions
+from vda5050_msgs.msg import NodeState
 
 
 def get_order(order_id=str(uuid4())):
@@ -749,3 +753,229 @@ def test_vda5050_mqtt_bridge_on_valid_vda5050_mqtt_messages(
         mqtt_bridge._instant_actions_pub.publish.assert_called_once()
     else:
         assert False
+
+
+# WGS84 coordinate system
+
+GEO_LON0 = -77.373513
+GEO_LAT0 = 39.439381
+GEO_METERS_PER_DEG = 100000.0
+
+
+class FakeNavSatGeoConverter:
+    """Linear stand-in for NavSatGeoConverter with map axes aligned to ENU."""
+
+    def __init__(self, node, timeout_sec):
+        self.ready = True
+
+    def _check_ready(self):
+        if not self.ready:
+            raise GeoConversionError("navsat_transform is not ready")
+
+    def lon_lat_to_map(self, lon_lats):
+        for lon, lat in lon_lats:
+            _validate_lon_lat(lon, lat)
+        self._check_ready()
+        return [
+            ((lon - GEO_LON0) * GEO_METERS_PER_DEG, (lat - GEO_LAT0) * GEO_METERS_PER_DEG, 0.0)
+            for lon, lat in lon_lats
+        ]
+
+    def map_to_lon_lat(self, x, y):
+        self._check_ready()
+        return GEO_LON0 + x / GEO_METERS_PER_DEG, GEO_LAT0 + y / GEO_METERS_PER_DEG
+
+    def enu_to_map_yaw(self, lon, lat):
+        self._check_ready()
+        return 0.0
+
+
+@pytest.fixture
+def make_wgs84_bridge(setup_rclpy, mocker, mock_mqtt_client):
+    bridges = []
+    read_str = mqtt_bridge_module.read_str_parameter
+    read_bool = mqtt_bridge_module.read_bool_parameter
+
+    def make(enable_validation=True):
+        str_overrides = {"coordinate_system": "wgs84", "geo_map_id": "WGS84"}
+        bool_overrides = {"enable_vda5050_validation": enable_validation}
+        mocker.patch.object(
+            mqtt_bridge_module,
+            "read_str_parameter",
+            side_effect=lambda node, name, default: read_str(
+                node, name, str_overrides.get(name, default)
+            ),
+        )
+        mocker.patch.object(
+            mqtt_bridge_module,
+            "read_bool_parameter",
+            side_effect=lambda node, name, default: read_bool(
+                node, name, bool_overrides.get(name, default)
+            ),
+        )
+        mocker.patch.object(mqtt_bridge_module, "NavSatGeoConverter", FakeNavSatGeoConverter)
+        bridge = MQTTBridge()
+        mocker.patch.object(bridge, "_order_pub")
+        mocker.patch.object(bridge, "_instant_actions_pub")
+        mocker.patch.object(bridge, "call_dtc_force_latch")
+        bridges.append(bridge)
+        return bridge
+
+    yield make
+    for bridge in bridges:
+        bridge.destroy_node()
+
+
+def wgs84_message(topic, payload):
+    message = MQTTMessage(topic=str.encode(f"uagv/v2/robots/robot_1/{topic}"))
+    message.payload = str.encode(json.dumps(payload))
+    return message
+
+
+def wgs84_order(lon=GEO_LON0 + 0.0001):
+    return {
+        "headerId": 1,
+        "timestamp": "2026-10-16T03:51:52.799Z",
+        "version": "2.0.0",
+        "manufacturer": "robots",
+        "serialNumber": "robot_1",
+        "orderId": "order_1",
+        "orderUpdateId": 0,
+        "nodes": [
+            {
+                "nodeId": "n1",
+                "sequenceId": 0,
+                "released": True,
+                "nodePosition": {"x": lon, "y": GEO_LAT0, "theta": 0.5, "mapId": "WGS84"},
+                "actions": [],
+            }
+        ],
+        "edges": [],
+    }
+
+
+def wgs84_init_position():
+    return {
+        "headerId": 1,
+        "timestamp": "2026-10-16T03:51:52.799Z",
+        "version": "2.0.0",
+        "manufacturer": "robots",
+        "serialNumber": "robot_1",
+        "actions": [
+            {
+                "actionType": "initPosition",
+                "actionId": "a1",
+                "blockingType": "HARD",
+                "actionParameters": [
+                    {"key": "x", "value": GEO_LON0 + 0.0001},
+                    {"key": "y", "value": GEO_LAT0},
+                    {"key": "theta", "value": 0.5},
+                ],
+            }
+        ],
+    }
+
+
+def published_payload(mock_mqtt_client):
+    _, payload = mock_mqtt_client.publish.call_args.args
+    return json.loads(payload)
+
+
+@pytest.mark.parametrize("enable_validation", [True, False], ids=["validation", "no-validation"])
+def test_wgs84_order_is_published_in_map_frame(make_wgs84_bridge, enable_validation):
+    bridge = make_wgs84_bridge(enable_validation)
+
+    bridge.on_message_mqtt(bridge.mqtt_client, None, wgs84_message("order", wgs84_order()))
+
+    bridge._order_pub.publish.assert_called_once()
+    position = bridge._order_pub.publish.call_args.kwargs["msg"].nodes[0].node_position
+    assert position.x == pytest.approx(10.0)
+    assert position.y == pytest.approx(0.0)
+    assert position.theta == pytest.approx(0.5)
+    bridge.call_dtc_force_latch.assert_not_called()
+
+
+@pytest.mark.parametrize("enable_validation", [True, False], ids=["validation", "no-validation"])
+@pytest.mark.parametrize(
+    "topic,payload",
+    [("order", wgs84_order()), ("instantActions", wgs84_init_position())],
+    ids=["order", "instantActions"],
+)
+def test_wgs84_message_dropped_without_dtc_when_navsat_unavailable(
+    make_wgs84_bridge, mocker, enable_validation, topic, payload
+):
+    bridge = make_wgs84_bridge(enable_validation)
+    bridge._geo_translator._converter.ready = False
+    log_error = mocker.spy(bridge.logger, "error")
+
+    bridge.on_message_mqtt(bridge.mqtt_client, None, wgs84_message(topic, payload))
+
+    bridge._order_pub.publish.assert_not_called()
+    bridge._instant_actions_pub.publish.assert_not_called()
+    bridge.call_dtc_force_latch.assert_not_called()
+    assert any(
+        "cannot convert WGS84 coordinates" in call.args[0] for call in log_error.call_args_list
+    )
+
+
+def test_wgs84_out_of_range_coordinates_latch_invalid_order_dtc(make_wgs84_bridge):
+    bridge = make_wgs84_bridge()
+
+    bridge.on_message_mqtt(
+        bridge.mqtt_client, None, wgs84_message("order", wgs84_order(lon=200.0))
+    )
+
+    bridge._order_pub.publish.assert_not_called()
+    bridge.call_dtc_force_latch.assert_called_once_with(bridge.invalid_order_dtc)
+
+
+def test_wgs84_state_is_published_in_wgs84(make_wgs84_bridge, mock_mqtt_client):
+    bridge = make_wgs84_bridge()
+    bridge.on_message_mqtt(bridge.mqtt_client, None, wgs84_message("order", wgs84_order()))
+    state = OrderState(order_id="order_1", order_update_id=0)
+    state.agv_position.position_initialized = True
+    state.agv_position.x = 10.0
+    state.agv_position.theta = 0.5
+    state.node_states = [NodeState(node_id="n1", sequence_id=0)]
+    state.node_states[0].node_position.x = 10.0
+
+    bridge._publish_state(state)
+
+    payload = published_payload(mock_mqtt_client)
+    assert payload["agvPosition"]["x"] == pytest.approx(GEO_LON0 + 0.0001)
+    assert payload["agvPosition"]["y"] == pytest.approx(GEO_LAT0)
+    assert payload["agvPosition"]["theta"] == pytest.approx(0.5)
+    assert payload["agvPosition"]["mapId"] == "WGS84"
+    assert payload["nodeStates"][0]["nodePosition"]["x"] == GEO_LON0 + 0.0001
+    assert payload["nodeStates"][0]["nodePosition"]["y"] == GEO_LAT0
+
+
+def test_wgs84_state_reports_uninitialized_position_when_navsat_unavailable(
+    make_wgs84_bridge, mock_mqtt_client
+):
+    bridge = make_wgs84_bridge()
+    bridge._geo_translator._converter.ready = False
+    state = OrderState()
+    state.agv_position.position_initialized = True
+    state.agv_position.x = 10.0
+
+    bridge._publish_state(state)
+
+    payload = published_payload(mock_mqtt_client)
+    assert payload["agvPosition"]["positionInitialized"] is False
+    assert payload["agvPosition"]["x"] == 0.0
+
+
+def test_wgs84_visualization_is_published_in_wgs84(make_wgs84_bridge, mock_mqtt_client):
+    bridge = make_wgs84_bridge()
+    visualization = Visualization()
+    visualization.agv_position.position_initialized = True
+    visualization.agv_position.y = 10.0
+
+    bridge._publish_visualization(visualization)
+
+    topic, _ = mock_mqtt_client.publish.call_args.args
+    payload = published_payload(mock_mqtt_client)
+    assert topic == "uagv/v2/robots/robot_1/visualization"
+    assert payload["agvPosition"]["x"] == pytest.approx(GEO_LON0)
+    assert payload["agvPosition"]["y"] == pytest.approx(GEO_LAT0 + 0.0001)

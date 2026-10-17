@@ -42,6 +42,9 @@ def main(args=None):
     rclpy.init(args=args)
 
     mqtt_bridge = MQTTBridge()
+    # JLG_CHANGES_START
+    executor = None
+    # JLG_CHANGES_END
 
     try:
         # JLG_CHANGES_START
@@ -59,6 +62,10 @@ def main(args=None):
         raise
     finally:
         mqtt_bridge.on_shutdown()
+        # JLG_CHANGES_START
+        if executor is not None:
+            executor.shutdown()
+        # JLG_CHANGES_END
         # Destroy the node explicitly
         # (optional - Done automatically when node is garbage collected)
         mqtt_bridge.destroy_node()

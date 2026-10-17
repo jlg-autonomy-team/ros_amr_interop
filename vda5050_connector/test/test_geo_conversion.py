@@ -395,7 +395,7 @@ def test_order_to_map_rejects_global_edge_without_start_node_position():
     order = get_order()
     del order["nodes"][0]["node_position"]
 
-    with pytest.raises(GeoConversionError):
+    with pytest.raises(ValueError):
         GeoCoordinateTranslator(FakeConverter()).order_to_map(order)
 
 

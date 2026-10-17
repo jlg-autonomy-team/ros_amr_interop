@@ -62,6 +62,7 @@ from vda5050_connector_py.utils import read_double_parameter
 from vda5050_connector_py.geo_conversion import COORDINATE_SYSTEM_CARTESIAN
 from vda5050_connector_py.geo_conversion import COORDINATE_SYSTEM_WGS84
 from vda5050_connector_py.geo_conversion import SUPPORTED_COORDINATE_SYSTEMS
+from vda5050_connector_py.geo_conversion import GeoConversionError
 from vda5050_connector_py.geo_conversion import NavSatGeoConverter
 from vda5050_connector_py.geo_conversion import GeoCoordinateTranslator
 # JLG_CHANGES_END
@@ -321,6 +322,13 @@ class MQTTBridge(Node):
         if self._geo_translator is None:
             return instant_actions
         return self._geo_translator.instant_actions_to_map(instant_actions)
+
+    def _log_geo_conversion_error(self, topic: str, ex: GeoConversionError):
+        # The message is valid; the robot just cannot place it in its map frame right now.
+        self.logger.error(
+            f"❌ Ignoring VDA5050 message on '{topic}': cannot convert WGS84 coordinates "
+            f"to the map frame: {ex}"
+        )
     # JLG_CHANGES_END
 
     def configure(self):
@@ -527,6 +535,9 @@ class MQTTBridge(Node):
                         )
                     )
                     self._instant_actions_pub.publish(msg=vda_instant_actions_message)
+            except GeoConversionError as ex:
+                self._log_geo_conversion_error(msg.topic, ex)
+                return
             except Exception as ex:
                 self.logger.warn(
                     f"Ignoring malformed VDA5050 message: {type(ex).__name__}: {ex}."
@@ -549,6 +560,9 @@ class MQTTBridge(Node):
                     )
                     self._instant_actions_pub.publish(msg=vda_instant_actions_message)
             # JLG_CHANGES_START
+            except GeoConversionError as ex:
+                self._log_geo_conversion_error(msg.topic, ex)
+                return
             except Exception as ex:
                 self.logger.warn(
                     f"Ignoring malformed VDA5050 message: {type(ex).__name__}: {ex}."

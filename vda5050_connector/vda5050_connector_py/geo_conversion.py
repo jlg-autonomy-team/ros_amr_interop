@@ -64,7 +64,7 @@ _MAX_PENDING_ORDERS = 4
 
 
 class GeoConversionError(Exception):
-    """Raised when coordinates cannot be converted between WGS84 and the map frame."""
+    """Raised when navsat_transform cannot convert coordinates (not ready, unavailable)."""
 
 
 def normalize_angle(angle: float) -> float:
@@ -74,7 +74,7 @@ def normalize_angle(angle: float) -> float:
 
 def _validate_lon_lat(lon: float, lat: float):
     if not (-180.0 <= lon <= 180.0 and -90.0 <= lat <= 90.0):
-        raise GeoConversionError(
+        raise ValueError(
             f"Invalid WGS84 coordinate (x=longitude: {lon}, y=latitude: {lat})"
         )
 
@@ -236,7 +236,7 @@ class GeoCoordinateTranslator:
 
         for edge in global_edges:
             if edge["start_node_id"] not in node_yaws:
-                raise GeoConversionError(
+                raise ValueError(
                     f"Cannot convert GLOBAL orientation of edge '{edge['edge_id']}' "
                     "without a start node position"
                 )

@@ -34,6 +34,7 @@ import pytest
 
 from vda5050_connector_py.geo_conversion import GeoConversionError
 from vda5050_connector_py.geo_conversion import GeoCoordinateTranslator
+from vda5050_connector_py.geo_conversion import NavSatGeoConverter
 from vda5050_msgs.msg import ControlPoint
 from vda5050_msgs.msg import EdgeState
 from vda5050_msgs.msg import NodeState
@@ -351,6 +352,43 @@ def test_stitched_base_entries_are_preserved():
     assert [cp.x for cp in state.edge_states[1].trajectory.control_points] == [
         LON0 + 0.001, LON0 + 0.002
     ]
+
+
+def test_accepted_entries_no_longer_reported_are_dropped():
+    converter = FakeConverter()
+    translator = GeoCoordinateTranslator(converter)
+    translator.order_to_map(make_order(
+        "o", 0, [make_node("A", 0, LON0), make_node("B", 2, LON0 + 0.001)],
+        [make_edge("e1", 1, "A", "B")],
+    ))
+    translator.state_to_wgs84(make_state("o", 0, [("A", 0), ("B", 2)], [("e1", 1)]))
+    translator.order_to_map(make_order(
+        "o", 1, [make_node("B", 2, LON0 + 0.001), make_node("C", 4, LON0 + 0.002)],
+        [make_edge("e2", 3, "B", "C")],
+    ))
+    translator.state_to_wgs84(make_state("o", 1, [("C", 4)], [("e2", 3)]))
+    translator.order_to_map(make_order(
+        "o", 2, [make_node("C", 4, LON0 + 0.002), make_node("D", 6, LON0 + 0.003)],
+        [make_edge("e3", 5, "C", "D")],
+    ))
+    converter.ready = False
+
+    state = translator.state_to_wgs84(make_state("o", 2, [("D", 6)], [("e3", 5)]))
+
+    assert state.node_states[0].node_position.x == LON0 + 0.003
+    # Only the newest update and the entries still reported remain.
+    assert set(translator._accepted_order["nodes"]) == {("C", 4), ("D", 6)}
+    assert set(translator._accepted_order["edges"]) == {("e3", 5)}
+
+
+def test_navsat_converter_measures_yaw_on_every_call():
+    converter = NavSatGeoConverter.__new__(NavSatGeoConverter)
+    yaws = iter([0.1, 0.2])
+    converter.lon_lat_to_map = lambda lon_lats: [(0.0, 0.0, next(yaws))]
+
+    assert converter.enu_to_map_yaw(LON0, LAT0) == 0.1
+    # e.g. after a SetDatum call the next message must use the new transform.
+    assert converter.enu_to_map_yaw(LON0, LAT0) == 0.2
 
 
 def test_order_to_map_rejects_global_edge_without_start_node_position():

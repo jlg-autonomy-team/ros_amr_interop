@@ -100,7 +100,6 @@ class NavSatGeoConverter:
             FromLLArray, "fromLLArray", callback_group=callback_group
         )
         self._to_ll_client = node.create_client(ToLL, "toLL", callback_group=callback_group)
-        self._enu_to_map_yaw = None
 
     def _call(self, client, request):
         if not client.service_is_ready():
@@ -157,7 +156,6 @@ class NavSatGeoConverter:
                 )
             poses.append((origin.x, origin.y, normalize_angle(math.atan2(dy, dx) - math.pi / 2.0)))
 
-        self._enu_to_map_yaw = poses[0][2]
         return poses
 
     def map_to_lon_lat(self, x: float, y: float) -> tuple:
@@ -171,9 +169,8 @@ class NavSatGeoConverter:
 
     def enu_to_map_yaw(self, lon: float, lat: float) -> float:
         """Yaw offset [rad] to add to an ENU heading to obtain a map-frame heading."""
-        if self._enu_to_map_yaw is None:
-            self.lon_lat_to_map([(lon, lat)])
-        return self._enu_to_map_yaw
+        # Measured on every call so a datum change or navsat restart is picked up immediately.
+        return self.lon_lat_to_map([(lon, lat)])[0][2]
 
 
 class GeoCoordinateTranslator:
@@ -190,6 +187,7 @@ class GeoCoordinateTranslator:
         self._pending_orders = OrderedDict()  # (order_id, order_update_id) -> snapshot
         self._accepted_key = None
         self._accepted_order = {"nodes": {}, "edges": {}}
+        self._newest_snapshot = {"nodes": {}, "edges": {}}
 
     # Inbound (fleet manager -> robot)
 
@@ -283,7 +281,7 @@ class GeoCoordinateTranslator:
         state = copy.deepcopy(state)
         self._agv_position_to_wgs84(state.agv_position)
 
-        original_order = self._accepted_snapshot(state.order_id, state.order_update_id)
+        original_order = self._accepted_snapshot(state)
 
         for node_state in state.node_states:
             key = (node_state.node_id, node_state.sequence_id)
@@ -387,20 +385,37 @@ class GeoCoordinateTranslator:
             while len(self._pending_orders) > _MAX_PENDING_ORDERS:
                 self._pending_orders.popitem(last=False)
 
-    def _accepted_snapshot(self, order_id: str, order_update_id: int) -> dict:
+    def _accepted_snapshot(self, state) -> dict:
+        order_id, order_update_id = state.order_id, state.order_update_id
         key = (order_id, order_update_id)
         with self._lock:
             if key != self._accepted_key:
                 if self._accepted_key is None or order_id != self._accepted_key[0]:
                     self._accepted_order = {"nodes": {}, "edges": {}}
+                    self._newest_snapshot = {"nodes": {}, "edges": {}}
                 # Merge so stitched base entries from earlier updates are kept.
                 snapshot = self._pending_orders.pop(key, None)
                 if snapshot:
                     self._accepted_order["nodes"].update(snapshot["nodes"])
                     self._accepted_order["edges"].update(snapshot["edges"])
+                    self._newest_snapshot = snapshot
                 self._accepted_key = key
                 for stale_key in [
                     k for k in self._pending_orders if k[0] == order_id and k[1] <= order_update_id
                 ]:
                     del self._pending_orders[stale_key]
+
+            # Traversed entries never return to the state, so only reported ones are kept.
+            node_keys = {(n.node_id, n.sequence_id) for n in state.node_states}
+            node_keys |= self._newest_snapshot["nodes"].keys()
+            edge_keys = {(e.edge_id, e.sequence_id) for e in state.edge_states}
+            edge_keys |= self._newest_snapshot["edges"].keys()
+            self._accepted_order = {
+                "nodes": {
+                    k: v for k, v in self._accepted_order["nodes"].items() if k in node_keys
+                },
+                "edges": {
+                    k: v for k, v in self._accepted_order["edges"].items() if k in edge_keys
+                },
+            }
             return self._accepted_order

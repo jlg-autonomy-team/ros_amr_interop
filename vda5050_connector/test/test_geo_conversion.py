@@ -29,6 +29,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import math
+from types import SimpleNamespace
 
 import pytest
 
@@ -389,6 +390,161 @@ def test_navsat_converter_measures_yaw_on_every_call():
     assert converter.enu_to_map_yaw(LON0, LAT0) == 0.1
     # e.g. after a SetDatum call the next message must use the new transform.
     assert converter.enu_to_map_yaw(LON0, LAT0) == 0.2
+
+
+def test_nan_to_ll_result_reports_position_as_not_initialized():
+    converter = NavSatGeoConverter.__new__(NavSatGeoConverter)
+    converter._to_ll_client = None
+    converter._to_ll_type = SimpleNamespace(Request=SimpleNamespace)
+    converter._point_type = SimpleNamespace
+    converter._call = lambda client, request: SimpleNamespace(
+        ll_point=SimpleNamespace(latitude=math.nan, longitude=math.nan)
+    )
+    visualization = Visualization()
+    visualization.agv_position.position_initialized = True
+    visualization.agv_position.x = math.nan
+    visualization.agv_position.y = math.nan
+
+    with pytest.raises(GeoConversionError):
+        converter.map_to_lon_lat(math.nan, math.nan)
+    wgs84 = GeoCoordinateTranslator(converter).visualization_to_wgs84(visualization)
+
+    assert not wgs84.agv_position.position_initialized
+    assert wgs84.agv_position.x == 0.0
+    assert wgs84.agv_position.y == 0.0
+
+
+class FakeFuture:
+    def __init__(self, response, completes):
+        self._response = response
+        self._completes = completes
+
+    def add_done_callback(self, callback):
+        if self._completes:
+            callback(self)
+
+    def result(self):
+        return self._response
+
+
+class FakeClient:
+    """Stand-in for an rclpy service client; `respond` maps a request to a response."""
+
+    srv_name = "fake_service"
+
+    def __init__(self, respond=lambda request: None, ready=True, completes=True):
+        self.respond = respond
+        self.ready = ready
+        self.completes = completes
+        self.requests = []
+        self.removed = []
+
+    def service_is_ready(self):
+        return self.ready
+
+    def call_async(self, request):
+        self.requests.append(request)
+        return FakeFuture(self.respond(request), self.completes)
+
+    def remove_pending_request(self, future):
+        self.removed.append(future)
+
+
+def planar_from_ll_array(request):
+    """Answer fromLLArray like navsat_transform would for the FakeConverter's map frame."""
+    c, s = math.cos(-MAP_YAW), math.sin(-MAP_YAW)
+    map_points = []
+    for p in request.ll_points:
+        e = (p.longitude - LON0) * METERS_PER_DEG
+        n = (p.latitude - LAT0) * METERS_PER_DEG
+        map_points.append(SimpleNamespace(x=c * e - s * n, y=s * e + c * n, z=0.0))
+    return SimpleNamespace(map_points=map_points)
+
+
+def make_navsat_converter(from_ll_array_client, timeout_sec=1.0):
+    converter = NavSatGeoConverter.__new__(NavSatGeoConverter)
+    converter._timeout_sec = timeout_sec
+    converter._geo_point_type = SimpleNamespace
+    converter._from_ll_array_type = SimpleNamespace(Request=SimpleNamespace)
+    converter._from_ll_array_client = from_ll_array_client
+    return converter
+
+
+def test_call_returns_service_response():
+    client = FakeClient(respond=lambda request: "response")
+    converter = make_navsat_converter(client)
+
+    assert converter._call(client, "request") == "response"
+    assert client.requests == ["request"]
+
+
+def test_call_raises_when_service_unavailable():
+    client = FakeClient(ready=False)
+
+    with pytest.raises(GeoConversionError, match="not available"):
+        make_navsat_converter(client)._call(client, "request")
+    assert client.requests == []
+
+
+def test_call_times_out_and_drops_pending_request():
+    client = FakeClient(completes=False)
+
+    with pytest.raises(GeoConversionError, match="did not respond"):
+        make_navsat_converter(client, timeout_sec=0.01)._call(client, "request")
+    assert len(client.removed) == 1
+
+
+def test_call_raises_when_service_call_fails():
+    client = FakeClient(respond=lambda request: None)
+
+    with pytest.raises(GeoConversionError, match="call failed"):
+        make_navsat_converter(client)._call(client, "request")
+
+
+def test_lon_lat_to_map_converts_points_with_per_point_yaw():
+    client = FakeClient(respond=planar_from_ll_array)
+    converter = make_navsat_converter(client)
+
+    poses = converter.lon_lat_to_map([(LON0 + 0.0001, LAT0), (LON0, LAT0 + 0.0001)])
+
+    # One request: the points followed by a north probe per point.
+    request = client.requests[0]
+    sent = [value for p in request.ll_points for value in (p.longitude, p.latitude)]
+    assert sent == pytest.approx([
+        LON0 + 0.0001, LAT0,
+        LON0, LAT0 + 0.0001,
+        LON0 + 0.0001, LAT0 + 0.0001,
+        LON0, LAT0 + 0.0002,
+    ])
+    assert poses[0] == pytest.approx(
+        (10.0 * math.cos(MAP_YAW), -10.0 * math.sin(MAP_YAW), -MAP_YAW)
+    )
+    assert poses[1] == pytest.approx(
+        (10.0 * math.sin(MAP_YAW), 10.0 * math.cos(MAP_YAW), -MAP_YAW)
+    )
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        SimpleNamespace(map_points=[]),
+        SimpleNamespace(map_points=[SimpleNamespace(x=0.0, y=0.0, z=0.0)] * 2),
+    ],
+    ids=["empty", "zeros"],
+)
+def test_lon_lat_to_map_raises_when_navsat_not_ready(response):
+    converter = make_navsat_converter(FakeClient(respond=lambda request: response))
+
+    with pytest.raises(GeoConversionError, match="not ready"):
+        converter.lon_lat_to_map([(LON0, LAT0)])
+
+
+def test_lon_lat_to_map_rejects_invalid_coordinates_without_calling_service():
+    client = FakeClient(respond=planar_from_ll_array)
+
+    with pytest.raises(ValueError):
+        make_navsat_converter(client).lon_lat_to_map([(LON0, 91.0)])
+    assert client.requests == []
 
 
 def test_order_to_map_rejects_global_edge_without_start_node_position():

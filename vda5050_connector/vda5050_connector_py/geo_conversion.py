@@ -83,7 +83,7 @@ class NavSatGeoConverter:
     """Converts coordinates through robot_localization navsat_transform services."""
 
     def __init__(self, node, timeout_sec: float):
-        # Imported here so cartesian deployments do not need robot_localization installed.
+        # Deferred so robot_localization is only loaded in wgs84 mode.
         from geographic_msgs.msg import GeoPoint
         from geometry_msgs.msg import Point
         from robot_localization.srv import FromLLArray, ToLL
@@ -165,6 +165,11 @@ class NavSatGeoConverter:
         ll_point = self._call(self._to_ll_client, request).ll_point
         if ll_point.latitude == 0.0 and ll_point.longitude == 0.0:
             raise GeoConversionError("navsat_transform is not ready (datum/transform unavailable)")
+        # NaN/out-of-range results (e.g. from a NaN pose) are a robot-side failure, not bad input.
+        try:
+            _validate_lon_lat(ll_point.longitude, ll_point.latitude)
+        except ValueError as ex:
+            raise GeoConversionError(f"toLL returned an invalid result: {ex}") from ex
         return ll_point.longitude, ll_point.latitude
 
     def enu_to_map_yaw(self, lon: float, lat: float) -> float:

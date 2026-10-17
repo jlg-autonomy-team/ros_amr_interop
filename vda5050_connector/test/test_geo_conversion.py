@@ -171,6 +171,32 @@ def test_order_to_map_rejects_when_not_ready():
         GeoCoordinateTranslator(FakeConverter(ready=False)).order_to_map(get_order())
 
 
+def test_order_to_map_converts_embedded_init_position_actions():
+    def init_position(action_id):
+        return {
+            "action_type": "initPosition",
+            "action_id": action_id,
+            "blocking_type": "HARD",
+            "action_parameters": [
+                {"key": "x", "value": LON0 + 0.0001},
+                {"key": "y", "value": LAT0},
+                {"key": "theta", "value": 1.0},
+            ],
+        }
+
+    order = get_order()
+    order["nodes"][1]["actions"] = [init_position("node_action")]
+    order["edges"][0]["actions"] = [init_position("edge_action")]
+
+    converted = GeoCoordinateTranslator(FakeConverter()).order_to_map(order)
+
+    for action in (converted["nodes"][1]["actions"][0], converted["edges"][0]["actions"][0]):
+        params = {p["key"]: p["value"] for p in action["action_parameters"]}
+        assert params["x"] == pytest.approx(10.0 * math.cos(MAP_YAW))
+        assert params["y"] == pytest.approx(-10.0 * math.sin(MAP_YAW))
+        assert params["theta"] == pytest.approx(1.0 - MAP_YAW)
+
+
 def test_instant_actions_init_position_to_map():
     instant_actions = {
         "actions": [

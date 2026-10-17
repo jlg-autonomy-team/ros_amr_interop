@@ -233,6 +233,9 @@ class GeoCoordinateTranslator:
         for edge in global_edges:
             edge["orientation"] = normalize_angle(float(edge["orientation"]) + yaw)
 
+        for element in order.get("nodes", []) + order.get("edges", []):
+            self._init_position_actions_to_map(element.get("actions", []))
+
         self._remember_original_order(order.get("order_id", ""), original_nodes, original_edges)
         return order
 
@@ -240,8 +243,11 @@ class GeoCoordinateTranslator:
         """Convert initPosition parameters of a snake_case instantActions dict to the map frame."""
         instant_actions = copy.deepcopy(instant_actions)
         actions_field = "instant_actions" if "instant_actions" in instant_actions else "actions"
+        self._init_position_actions_to_map(instant_actions.get(actions_field, []))
+        return instant_actions
 
-        for action in instant_actions.get(actions_field, []):
+    def _init_position_actions_to_map(self, actions: list):
+        for action in actions:
             if action.get("action_type") != INIT_POSITION_ACTION:
                 continue
             params = {p["key"]: p for p in action.get("action_parameters", [])}
@@ -254,8 +260,6 @@ class GeoCoordinateTranslator:
             params["y"]["value"] = y
             if "theta" in params:
                 params["theta"]["value"] = normalize_angle(float(params["theta"]["value"]) + yaw)
-
-        return instant_actions
 
     # Outbound (robot -> fleet manager)
 

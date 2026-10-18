@@ -33,6 +33,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from vda5050_connector_py.geo_conversion import _MAX_UNCONFIRMED_CANDIDATES
 from vda5050_connector_py.geo_conversion import _UNREPORTED_GRACE_STATES
 from vda5050_connector_py.geo_conversion import GeoConversionError
 from vda5050_connector_py.geo_conversion import GeoCoordinateTranslator
@@ -349,6 +350,33 @@ def test_state_skipping_an_accepted_update_reports_its_coordinates():
     ]
     assert [cp.x for cp in state.edge_states[0].trajectory.control_points] == [
         LON0, LON0 + 0.0012
+    ]
+
+
+def test_state_confirmed_position_survives_many_rejected_alternatives():
+    converter = FakeConverter()
+    translator = GeoCoordinateTranslator(converter)
+    accepted = translator.order_to_map(make_order(
+        "o", 0, [make_node("A", 0, LON0), make_node("B", 2, LON0 + 0.001)],
+        [make_edge("e1", 1, "A", "B", (LON0, LON0 + 0.001))],
+    ))
+    reported = make_state("o", 0, accepted["nodes"], accepted["edges"])
+    translator.state_to_wgs84(reported)
+    # More changed duplicates than the bounded alternatives list holds; all discarded.
+    for i in range(_MAX_UNCONFIRMED_CANDIDATES + 1):
+        lon = LON0 + 0.002 + i * 0.0001
+        translator.order_to_map(make_order(
+            "o", 0, [make_node("A", 0, LON0), make_node("B", 2, lon)],
+            [make_edge("e1", 1, "A", "B", (LON0, lon))],
+        ))
+        translator.state_to_wgs84(reported)
+    converter.ready = False
+
+    state = translator.state_to_wgs84(reported)
+
+    assert state.node_states[1].node_position.x == LON0 + 0.001
+    assert [cp.x for cp in state.edge_states[0].trajectory.control_points] == [
+        LON0, LON0 + 0.001
     ]
 
 

@@ -61,7 +61,7 @@ _NORTH_PROBE_DEG = 1e-4
 _MIN_PROBE_DISTANCE_M = 1.0
 # Received coordinates not yet reported by the controller survive this many state messages.
 _UNREPORTED_GRACE_STATES = 5
-_MAX_CANDIDATES_PER_ELEMENT = 4
+_MAX_UNCONFIRMED_CANDIDATES = 4
 
 
 class GeoConversionError(Exception):
@@ -191,7 +191,9 @@ class GeoCoordinateTranslator:
         self._lock = threading.Lock()
         # Originals received from the fleet manager, matched to states by the map value the
         # controller reports, since the bridge does not see which orders were accepted:
-        # (order_id, "node"|"edge", element_id, sequence_id) -> [(map_value, original, added_at)]
+        # (order_id, "node"|"edge", element_id, sequence_id) ->
+        #     {"confirmed": entry | None, "unconfirmed": [entry]}, entry = (map_value, original,
+        #     last_seen_state). "confirmed" is the candidate a state last reported.
         self._candidates = {}
         self._state_count = 0
 
@@ -411,16 +413,28 @@ class GeoCoordinateTranslator:
     def _remember_candidates(self, order_id: str, candidates: list):
         with self._lock:
             for element, map_value, original in candidates:
-                entries = self._candidates.setdefault((order_id,) + element, [])
-                entries[:] = [entry for entry in entries if entry[0] != map_value]
-                entries.insert(0, (map_value, original, self._state_count))
-                del entries[_MAX_CANDIDATES_PER_ELEMENT:]
+                slot = self._candidates.setdefault(
+                    (order_id,) + element, {"confirmed": None, "unconfirmed": []}
+                )
+                if slot["confirmed"] and slot["confirmed"][0] == map_value:
+                    continue
+                unconfirmed = [entry for entry in slot["unconfirmed"] if entry[0] != map_value]
+                unconfirmed.insert(0, (map_value, original, self._state_count))
+                slot["unconfirmed"] = unconfirmed[:_MAX_UNCONFIRMED_CANDIDATES]
 
     def _find_original(self, key: tuple, map_value: tuple) -> tuple:
-        for candidate_map_value, original, _ in self._candidates.get(key, []):
-            if candidate_map_value == map_value:
-                return True, original
-        return False, None
+        slot = self._candidates.get(key)
+        if slot is None:
+            return False, None
+        match = slot["confirmed"]
+        if match is None or match[0] != map_value:
+            match = next((e for e in slot["unconfirmed"] if e[0] == map_value), None)
+            if match is None:
+                return False, None
+            # Reported by a state, so accepted: keep it out of the bounded alternatives.
+            slot["unconfirmed"].remove(match)
+        slot["confirmed"] = (match[0], match[1], self._state_count)
+        return True, match[1]
 
     def _prune_candidates(self, state):
         reported = {
@@ -431,10 +445,11 @@ class GeoCoordinateTranslator:
             if key in reported:
                 continue
             # Traversed or rejected entries are dropped once they are past the grace period.
-            entries = [entry for entry in self._candidates[key] if entry[2] > oldest_kept]
-            if entries:
-                self._candidates[key] = entries
-            else:
+            slot = self._candidates[key]
+            slot["unconfirmed"] = [e for e in slot["unconfirmed"] if e[2] > oldest_kept]
+            if slot["confirmed"] and slot["confirmed"][2] <= oldest_kept:
+                slot["confirmed"] = None
+            if slot["confirmed"] is None and not slot["unconfirmed"]:
                 del self._candidates[key]
         self._state_count += 1
 

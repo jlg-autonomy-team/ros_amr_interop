@@ -35,6 +35,7 @@ from types import SimpleNamespace
 import pytest
 from rosidl_runtime_py import message_to_ordereddict
 
+from vda5050_connector_py import geo_conversion
 from vda5050_connector_py.geo_conversion import _MAX_UNCONFIRMED_CANDIDATES
 from vda5050_connector_py.geo_conversion import _UNREPORTED_GRACE_STATES
 from vda5050_connector_py.geo_conversion import _validate_lon_lat
@@ -828,6 +829,62 @@ def test_unconvertible_state_positions_are_omitted():
     assert serialized["node_states"][0]["node_id"] == "n1"
     assert serialized["edge_states"][0]["edge_id"] == "e1"
     assert "NaN" not in json.dumps(serialized)
+
+
+class CountingConverter(FakeConverter):
+    def __init__(self, ready=True):
+        super().__init__(ready)
+        self.calls = 0
+
+    def map_to_lon_lat(self, x, y):
+        self.calls += 1
+        return super().map_to_lon_lat(x, y)
+
+
+def uncached_state(nodes=20):
+    state = OrderState(order_id="unknown")
+    state.agv_position.position_initialized = True
+    state.agv_position.x = 10.0
+    state.node_states = [NodeState(node_id=f"n{i}", sequence_id=2 * i) for i in range(nodes)]
+    state.edge_states = [EdgeState(edge_id="e1", sequence_id=1)]
+    state.edge_states[0].trajectory.control_points = [ControlPoint(), ControlPoint()]
+    return state
+
+
+def test_service_failure_skips_remaining_uncached_conversions():
+    converter = CountingConverter(ready=False)
+    translator = GeoCoordinateTranslator(converter)
+
+    serialized = drop_unknown_positions(
+        message_to_ordereddict(translator.state_to_wgs84(uncached_state()))
+    )
+
+    # One failed call, not one timeout per node and control point.
+    assert converter.calls == 1
+    assert all("node_position" not in n for n in serialized["node_states"])
+    assert "trajectory" not in serialized["edge_states"][0]
+    assert not serialized["agv_position"]["position_initialized"]
+
+    translator.state_to_wgs84(uncached_state())
+    assert converter.calls == 2
+
+
+def test_conversion_budget_bounds_time_per_state(monkeypatch):
+    clock = iter(range(100))
+    monkeypatch.setattr(
+        geo_conversion, "time", SimpleNamespace(monotonic=lambda: next(clock) * 0.4)
+    )
+    converter = CountingConverter()
+    translator = GeoCoordinateTranslator(converter, conversion_budget_sec=1.0)
+
+    wgs84 = translator.state_to_wgs84(uncached_state())
+    serialized = drop_unknown_positions(message_to_ordereddict(wgs84))
+
+    # Robot position (two checks at 0.4 s and 0.8 s) fits the 1 s budget; the rest is omitted.
+    assert wgs84.agv_position.position_initialized
+    assert converter.calls == 1
+    assert all("node_position" not in n for n in serialized["node_states"])
+    assert "trajectory" not in serialized["edge_states"][0]
 
 
 @pytest.mark.parametrize("theta", [math.inf, math.nan], ids=["inf", "nan"])

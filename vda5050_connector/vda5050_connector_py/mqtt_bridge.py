@@ -419,6 +419,7 @@ class MQTTBridge(Node):
                 converter=NavSatGeoConverter(node=self, timeout_sec=self.geo_service_timeout),
                 map_id=self.geo_map_id,
                 logger=self.logger,
+                conversion_budget_sec=self.geo_service_timeout,
             )
             self.logger.info(
                 "VDA5050 MQTT coordinates are WGS84 (x=longitude, y=latitude)"

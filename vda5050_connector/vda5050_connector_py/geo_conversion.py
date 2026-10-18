@@ -47,6 +47,7 @@ Distances (``allowedDeviationXY``, edge ``length``, ...) stay in meters.
 import copy
 import math
 import threading
+import time
 
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
@@ -195,10 +196,16 @@ class NavSatGeoConverter:
 class GeoCoordinateTranslator:
     """Translates VDA5050 payload coordinates between WGS84 and the map frame."""
 
-    def __init__(self, converter, map_id: str = "", logger=None):
+    def __init__(
+        self, converter, map_id: str = "", logger=None, conversion_budget_sec: float = None
+    ):
         self._converter = converter
         self._map_id = map_id
         self._logger = logger
+        # Time allowed for new service conversions per outbound message (None: unbounded).
+        self._conversion_budget_sec = conversion_budget_sec
+        self._skip_conversions = False
+        self._conversion_deadline = None
         self._lock = threading.Lock()
         # Originals received from the fleet manager, matched to states by the map value the
         # controller reports, since the bridge does not see which orders were accepted:
@@ -337,6 +344,7 @@ class GeoCoordinateTranslator:
         the result through drop_unknown_positions() so they are omitted instead of published.
         """
         state = copy.deepcopy(state)
+        self._begin_outbound_conversion()
         self._agv_position_to_wgs84(state.agv_position)
 
         with self._lock:
@@ -385,10 +393,33 @@ class GeoCoordinateTranslator:
     def visualization_to_wgs84(self, visualization):
         """Return a copy of a Visualization ROS message with WGS84 coordinates."""
         visualization = copy.deepcopy(visualization)
+        self._begin_outbound_conversion()
         self._agv_position_to_wgs84(visualization.agv_position)
         return visualization
 
     # Helpers
+
+    def _begin_outbound_conversion(self):
+        self._skip_conversions = False
+        self._conversion_deadline = (
+            None if self._conversion_budget_sec is None
+            else time.monotonic() + self._conversion_budget_sec
+        )
+
+    def _convert(self, function, *args):
+        # One unresponsive service must not cost a full timeout per uncached point.
+        if self._skip_conversions or (
+            self._conversion_deadline is not None
+            and time.monotonic() > self._conversion_deadline
+        ):
+            raise GeoConversionError(
+                "skipped: an earlier conversion for this message failed or ran out of time"
+            )
+        try:
+            return function(*args)
+        except GeoConversionError:
+            self._skip_conversions = True
+            raise
 
     def _lon_lat_to_map_single(self, lon: float, lat: float) -> tuple:
         x, y, yaw = self._converter.lon_lat_to_map([(lon, lat)])[0]
@@ -398,8 +429,8 @@ class GeoCoordinateTranslator:
         # Robot-side NaN/inf poses must take the not-initialized/omission fallback.
         if not all(math.isfinite(v) for v in (x, y, theta)):
             raise GeoConversionError(f"Non-finite map pose (x={x}, y={y}, theta={theta})")
-        lon, lat = self._converter.map_to_lon_lat(x, y)
-        yaw = self._converter.enu_to_map_yaw(lon, lat)
+        lon, lat = self._convert(self._converter.map_to_lon_lat, x, y)
+        yaw = self._convert(self._converter.enu_to_map_yaw, lon, lat)
         return lon, lat, normalize_angle(theta - yaw)
 
     def _node_position_to_wgs84(self, position):
@@ -413,8 +444,8 @@ class GeoCoordinateTranslator:
 
     def _control_point_to_wgs84(self, control_point):
         try:
-            control_point.x, control_point.y = self._converter.map_to_lon_lat(
-                control_point.x, control_point.y
+            control_point.x, control_point.y = self._convert(
+                self._converter.map_to_lon_lat, control_point.x, control_point.y
             )
         except GeoConversionError as ex:
             self._warn(f"Omitting edge trajectory from the state: {ex}")

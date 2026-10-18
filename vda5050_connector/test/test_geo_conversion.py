@@ -37,6 +37,7 @@ from rosidl_runtime_py import message_to_ordereddict
 
 from vda5050_connector_py.geo_conversion import _MAX_UNCONFIRMED_CANDIDATES
 from vda5050_connector_py.geo_conversion import _UNREPORTED_GRACE_STATES
+from vda5050_connector_py.geo_conversion import _validate_lon_lat
 from vda5050_connector_py.geo_conversion import drop_unknown_positions
 from vda5050_connector_py.geo_conversion import GeoConversionError
 from vda5050_connector_py.geo_conversion import GeoCoordinateTranslator
@@ -67,6 +68,8 @@ class FakeConverter:
         self.ready = ready
 
     def lon_lat_to_map(self, lon_lats):
+        for lon, lat in lon_lats:
+            _validate_lon_lat(lon, lat)
         if not self.ready:
             raise GeoConversionError("not ready")
         poses = []
@@ -746,6 +749,32 @@ def test_failed_init_position_keeps_other_instant_actions():
     assert converted["actions"][0] == cancel_order
     # Unconverted degrees are never forwarded; the adapter fails the action instead.
     assert converted["actions"][1]["action_parameters"] == [{"key": "mapId", "value": "WGS84"}]
+
+
+@pytest.mark.parametrize(
+    "x,theta",
+    [(200.0, 1.0), ("abc", 1.0), ([1, 2], 1.0), (LON0, "abc")],
+    ids=["out-of-range", "non-numeric", "array", "non-numeric-theta"],
+)
+def test_invalid_init_position_parameters_keep_other_instant_actions(x, theta):
+    cancel_order = {"action_type": "cancelOrder", "action_id": "a1", "blocking_type": "HARD"}
+    init_position = {
+        "action_type": "initPosition",
+        "action_id": "a2",
+        "blocking_type": "HARD",
+        "action_parameters": [
+            {"key": "x", "value": x},
+            {"key": "y", "value": LAT0},
+            {"key": "theta", "value": theta},
+        ],
+    }
+
+    converted = GeoCoordinateTranslator(FakeConverter()).instant_actions_to_map(
+        {"actions": [cancel_order, init_position]}
+    )
+
+    assert converted["actions"][0] == cancel_order
+    assert converted["actions"][1]["action_parameters"] == []
 
 
 def test_unconvertible_state_positions_are_omitted():

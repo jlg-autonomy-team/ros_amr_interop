@@ -286,17 +286,22 @@ class GeoCoordinateTranslator:
         for action in instant_actions.get(actions_field, []):
             try:
                 self._init_position_action_to_map(action)
-            except GeoConversionError as ex:
+            except (GeoConversionError, ValueError, TypeError) as ex:
                 # Other actions (e.g. cancelOrder) must still go through; without coordinates
                 # the adapter fails this initPosition and reports it in the action state.
                 action["action_parameters"] = [
                     p for p in action.get("action_parameters", [])
                     if p["key"] not in _INIT_POSITION_COORDINATE_KEYS
                 ]
+                reason = (
+                    "cannot convert WGS84 coordinates to the map frame"
+                    if isinstance(ex, GeoConversionError)
+                    else "invalid coordinate parameters"
+                )
                 if self._logger:
                     self._logger.error(
                         f"Forwarding initPosition '{action.get('action_id')}' without "
-                        f"coordinates: cannot convert WGS84 coordinates to the map frame: {ex}"
+                        f"coordinates: {reason}: {ex}"
                     )
         return instant_actions
 

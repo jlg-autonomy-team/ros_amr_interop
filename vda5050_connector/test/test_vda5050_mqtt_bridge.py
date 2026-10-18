@@ -932,12 +932,17 @@ def test_wgs84_out_of_range_coordinates_latch_invalid_order_dtc(make_wgs84_bridg
 def test_wgs84_state_is_published_in_wgs84(make_wgs84_bridge, mock_mqtt_client):
     bridge = make_wgs84_bridge()
     bridge.on_message_mqtt(bridge.mqtt_client, None, wgs84_message("order", wgs84_order()))
+    published_order = bridge._order_pub.publish.call_args.kwargs["msg"]
     state = OrderState(order_id="order_1", order_update_id=0)
     state.agv_position.position_initialized = True
     state.agv_position.x = 10.0
     state.agv_position.theta = 0.5
-    state.node_states = [NodeState(node_id="n1", sequence_id=0)]
-    state.node_states[0].node_position.x = 10.0
+    # The controller reports the node with the map position it received.
+    state.node_states = [
+        NodeState(
+            node_id="n1", sequence_id=0, node_position=published_order.nodes[0].node_position
+        )
+    ]
 
     bridge._publish_state(state)
 

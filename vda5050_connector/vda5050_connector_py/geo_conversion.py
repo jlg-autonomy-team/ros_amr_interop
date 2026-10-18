@@ -44,7 +44,6 @@ services, so it always matches the frame the robot localizes in.
 Distances (``allowedDeviationXY``, edge ``length``, ...) stay in meters.
 """
 
-from collections import OrderedDict
 import copy
 import math
 import threading
@@ -60,7 +59,9 @@ INIT_POSITION_ACTION = "initPosition"
 # Roughly 11 m north; used to measure the map-frame direction of true north.
 _NORTH_PROBE_DEG = 1e-4
 _MIN_PROBE_DISTANCE_M = 1.0
-_MAX_PENDING_ORDERS = 4
+# Received coordinates not yet reported by the controller survive this many state messages.
+_UNREPORTED_GRACE_STATES = 5
+_MAX_CANDIDATES_PER_ELEMENT = 4
 
 
 class GeoConversionError(Exception):
@@ -188,13 +189,11 @@ class GeoCoordinateTranslator:
         self._map_id = map_id
         self._logger = logger
         self._lock = threading.Lock()
-        # WGS84 positions as received from the fleet manager, as snapshots:
-        # {"nodes": {(node_id, sequence_id): node_position}, "edges": {...}}.
-        # Orders wait in pending until a state shows the controller accepted them.
-        self._pending_orders = OrderedDict()  # (order_id, order_update_id) -> snapshot
-        self._accepted_key = None
-        self._accepted_order = {"nodes": {}, "edges": {}}
-        self._newest_snapshot = {"nodes": {}, "edges": {}}
+        # Originals received from the fleet manager, matched to states by the map value the
+        # controller reports, since the bridge does not see which orders were accepted:
+        # (order_id, "node"|"edge", element_id, sequence_id) -> [(map_value, original, added_at)]
+        self._candidates = {}
+        self._state_count = 0
 
     # Inbound (fleet manager -> robot)
 
@@ -253,9 +252,24 @@ class GeoCoordinateTranslator:
         for element in order.get("nodes", []) + order.get("edges", []):
             self._init_position_actions_to_map(element.get("actions", []))
 
-        self._remember_pending_order(
-            (order.get("order_id", ""), order.get("order_update_id", 0)),
-            {"nodes": original_nodes, "edges": original_edges},
+        self._remember_candidates(
+            order.get("order_id", ""),
+            [
+                (
+                    ("node", node["node_id"], node["sequence_id"]),
+                    _node_map_value(node.get("node_position")),
+                    original_nodes[(node["node_id"], node["sequence_id"])],
+                )
+                for node in order.get("nodes", [])
+            ]
+            + [
+                (
+                    ("edge", edge["edge_id"], edge["sequence_id"]),
+                    _edge_map_value(edge.get("trajectory", {}).get("control_points", [])),
+                    original_edges[(edge["edge_id"], edge["sequence_id"])],
+                )
+                for edge in order.get("edges", [])
+            ],
         )
         return order
 
@@ -288,12 +302,25 @@ class GeoCoordinateTranslator:
         state = copy.deepcopy(state)
         self._agv_position_to_wgs84(state.agv_position)
 
-        original_order = self._accepted_snapshot(state)
+        with self._lock:
+            node_originals = [
+                self._find_original(
+                    (state.order_id, "node", ns.node_id, ns.sequence_id),
+                    _node_map_value(ns.node_position),
+                )
+                for ns in state.node_states
+            ]
+            edge_originals = [
+                self._find_original(
+                    (state.order_id, "edge", es.edge_id, es.sequence_id),
+                    _edge_map_value(es.trajectory.control_points),
+                )
+                for es in state.edge_states
+            ]
+            self._prune_candidates(state)
 
-        for node_state in state.node_states:
-            key = (node_state.node_id, node_state.sequence_id)
-            if key in original_order["nodes"]:
-                original_position = original_order["nodes"][key]
+        for node_state, (found, original_position) in zip(state.node_states, node_originals):
+            if found:
                 if original_position is not None:
                     node_state.node_position.x = float(original_position["x"])
                     node_state.node_position.y = float(original_position["y"])
@@ -301,12 +328,12 @@ class GeoCoordinateTranslator:
             else:
                 self._node_position_to_wgs84(node_state.node_position)
 
-        for edge_state in state.edge_states:
-            key = (edge_state.edge_id, edge_state.sequence_id)
-            if key in original_order["edges"]:
-                original_control_points = original_order["edges"][key] or []
+        for edge_state, (found, original_control_points) in zip(
+            state.edge_states, edge_originals
+        ):
+            if found:
                 for cp, original_cp in zip(
-                    edge_state.trajectory.control_points, original_control_points
+                    edge_state.trajectory.control_points, original_control_points or []
                 ):
                     cp.x = float(original_cp["x"])
                     cp.y = float(original_cp["y"])
@@ -381,48 +408,53 @@ class GeoCoordinateTranslator:
             agv_position.y = 0.0
             agv_position.theta = 0.0
 
-    def _remember_pending_order(self, key: tuple, snapshot: dict):
+    def _remember_candidates(self, order_id: str, candidates: list):
         with self._lock:
-            accepted = self._accepted_key
-            # The controller discards or rejects update ids at or below the accepted one.
-            if accepted and key[0] == accepted[0] and key[1] <= accepted[1]:
-                return
-            self._pending_orders.pop(key, None)
-            self._pending_orders[key] = snapshot
-            while len(self._pending_orders) > _MAX_PENDING_ORDERS:
-                self._pending_orders.popitem(last=False)
+            for element, map_value, original in candidates:
+                entries = self._candidates.setdefault((order_id,) + element, [])
+                entries[:] = [entry for entry in entries if entry[0] != map_value]
+                entries.insert(0, (map_value, original, self._state_count))
+                del entries[_MAX_CANDIDATES_PER_ELEMENT:]
 
-    def _accepted_snapshot(self, state) -> dict:
-        order_id, order_update_id = state.order_id, state.order_update_id
-        key = (order_id, order_update_id)
-        with self._lock:
-            if key != self._accepted_key:
-                if self._accepted_key is None or order_id != self._accepted_key[0]:
-                    self._accepted_order = {"nodes": {}, "edges": {}}
-                    self._newest_snapshot = {"nodes": {}, "edges": {}}
-                # Merge so stitched base entries from earlier updates are kept.
-                snapshot = self._pending_orders.pop(key, None)
-                if snapshot:
-                    self._accepted_order["nodes"].update(snapshot["nodes"])
-                    self._accepted_order["edges"].update(snapshot["edges"])
-                    self._newest_snapshot = snapshot
-                self._accepted_key = key
-                for stale_key in [
-                    k for k in self._pending_orders if k[0] == order_id and k[1] <= order_update_id
-                ]:
-                    del self._pending_orders[stale_key]
+    def _find_original(self, key: tuple, map_value: tuple) -> tuple:
+        for candidate_map_value, original, _ in self._candidates.get(key, []):
+            if candidate_map_value == map_value:
+                return True, original
+        return False, None
 
-            # Traversed entries never return to the state, so only reported ones are kept.
-            node_keys = {(n.node_id, n.sequence_id) for n in state.node_states}
-            node_keys |= self._newest_snapshot["nodes"].keys()
-            edge_keys = {(e.edge_id, e.sequence_id) for e in state.edge_states}
-            edge_keys |= self._newest_snapshot["edges"].keys()
-            self._accepted_order = {
-                "nodes": {
-                    k: v for k, v in self._accepted_order["nodes"].items() if k in node_keys
-                },
-                "edges": {
-                    k: v for k, v in self._accepted_order["edges"].items() if k in edge_keys
-                },
-            }
-            return self._accepted_order
+    def _prune_candidates(self, state):
+        reported = {
+            (state.order_id, "node", n.node_id, n.sequence_id) for n in state.node_states
+        } | {(state.order_id, "edge", e.edge_id, e.sequence_id) for e in state.edge_states}
+        oldest_kept = self._state_count - _UNREPORTED_GRACE_STATES
+        for key in list(self._candidates):
+            if key in reported:
+                continue
+            # Traversed or rejected entries are dropped once they are past the grace period.
+            entries = [entry for entry in self._candidates[key] if entry[2] > oldest_kept]
+            if entries:
+                self._candidates[key] = entries
+            else:
+                del self._candidates[key]
+        self._state_count += 1
+
+
+def _node_map_value(position) -> tuple:
+    """Map-frame node position as the controller reports it in node states."""
+    if position is None:
+        return (0.0, 0.0, 0.0)
+    if isinstance(position, dict):
+        return (
+            float(position["x"]),
+            float(position["y"]),
+            float(position.get("theta", 0.0)),
+        )
+    return (position.x, position.y, position.theta)
+
+
+def _edge_map_value(control_points) -> tuple:
+    """Map-frame trajectory control points as the controller reports them in edge states."""
+    return tuple(
+        (float(cp["x"]), float(cp["y"])) if isinstance(cp, dict) else (cp.x, cp.y)
+        for cp in control_points
+    )

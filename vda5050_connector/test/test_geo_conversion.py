@@ -33,6 +33,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from vda5050_connector_py.geo_conversion import _UNREPORTED_GRACE_STATES
 from vda5050_connector_py.geo_conversion import GeoConversionError
 from vda5050_connector_py.geo_conversion import GeoCoordinateTranslator
 from vda5050_connector_py.geo_conversion import NavSatGeoConverter
@@ -194,12 +195,23 @@ def make_order(order_id, order_update_id, nodes, edges):
     }
 
 
-def make_state(order_id, order_update_id, node_keys=(), edge_keys=()):
+def make_state(order_id, order_update_id, nodes=(), edges=()):
+    """State as the controller reports it, built from converted (map-frame) order elements."""
     state = OrderState(order_id=order_id, order_update_id=order_update_id)
-    state.node_states = [NodeState(node_id=n, sequence_id=s) for n, s in node_keys]
-    state.edge_states = [EdgeState(edge_id=e, sequence_id=s) for e, s in edge_keys]
-    for edge_state in state.edge_states:
-        edge_state.trajectory.control_points = [ControlPoint(), ControlPoint()]
+    for node in nodes:
+        node_state = NodeState(node_id=node["node_id"], sequence_id=node["sequence_id"])
+        position = node["node_position"]
+        node_state.node_position.x = position["x"]
+        node_state.node_position.y = position["y"]
+        node_state.node_position.theta = position["theta"]
+        state.node_states.append(node_state)
+    for edge in edges:
+        edge_state = EdgeState(edge_id=edge["edge_id"], sequence_id=edge["sequence_id"])
+        edge_state.trajectory.control_points = [
+            ControlPoint(x=cp["x"], y=cp["y"])
+            for cp in edge.get("trajectory", {}).get("control_points", [])
+        ]
+        state.edge_states.append(edge_state)
     return state
 
 
@@ -228,11 +240,10 @@ def test_order_update_converts_stitch_node_identically():
 def test_rejected_stitch_update_does_not_replace_accepted_positions():
     converter = FakeConverter()
     translator = GeoCoordinateTranslator(converter)
-    translator.order_to_map(make_order(
+    accepted = translator.order_to_map(make_order(
         "o", 0, [make_node("A", 0, LON0), make_node("B", 2, LON0 + 0.001)],
         [make_edge("e1", 1, "A", "B")],
     ))
-    translator.state_to_wgs84(make_state("o", 0))
     # Moved stitch node: the controller rejects this update.
     translator.order_to_map(make_order(
         "o", 1, [make_node("B", 2, LON0 + 0.0011), make_node("C", 4, LON0 + 0.002)],
@@ -240,7 +251,7 @@ def test_rejected_stitch_update_does_not_replace_accepted_positions():
     ))
     converter.ready = False
 
-    state = translator.state_to_wgs84(make_state("o", 0, [("B", 2)]))
+    state = translator.state_to_wgs84(make_state("o", 0, [accepted["nodes"][1]]))
 
     assert state.node_states[0].node_position.x == LON0 + 0.001
 
@@ -249,21 +260,16 @@ def test_corrected_update_with_same_id_is_used_once_accepted():
     converter = FakeConverter()
     translator = GeoCoordinateTranslator(converter)
     translator.order_to_map(make_order(
-        "o", 0, [make_node("A", 0, LON0), make_node("B", 2, LON0 + 0.001)],
-        [make_edge("e1", 1, "A", "B")],
-    ))
-    translator.state_to_wgs84(make_state("o", 0))
-    translator.order_to_map(make_order(
         "o", 1, [make_node("B", 2, LON0 + 0.0011), make_node("C", 4, LON0 + 0.003)],
         [make_edge("e2", 3, "B", "C")],
     ))
-    translator.order_to_map(make_order(
+    corrected = translator.order_to_map(make_order(
         "o", 1, [make_node("B", 2, LON0 + 0.001), make_node("C", 4, LON0 + 0.002)],
         [make_edge("e2", 3, "B", "C")],
     ))
     converter.ready = False
 
-    state = translator.state_to_wgs84(make_state("o", 1, [("B", 2), ("C", 4)]))
+    state = translator.state_to_wgs84(make_state("o", 1, corrected["nodes"]))
 
     assert state.node_states[0].node_position.x == LON0 + 0.001
     assert state.node_states[1].node_position.x == LON0 + 0.002
@@ -272,77 +278,116 @@ def test_corrected_update_with_same_id_is_used_once_accepted():
 def test_stale_update_does_not_replace_accepted_positions():
     converter = FakeConverter()
     translator = GeoCoordinateTranslator(converter)
-    translator.order_to_map(make_order(
+    accepted = translator.order_to_map(make_order(
         "o", 2, [make_node("A", 0, LON0), make_node("H", 2, LON0 + 0.001)],
         [make_edge("e1", 1, "A", "H")],
     ))
-    translator.state_to_wgs84(make_state("o", 2))
     translator.order_to_map(make_order(
         "o", 1, [make_node("A", 0, LON0), make_node("H", 2, LON0 + 0.005)],
         [make_edge("e1", 1, "A", "H")],
     ))
     converter.ready = False
 
-    state = translator.state_to_wgs84(make_state("o", 2, [("H", 2)]))
+    state = translator.state_to_wgs84(make_state("o", 2, [accepted["nodes"][1]]))
 
     assert state.node_states[0].node_position.x == LON0 + 0.001
 
 
-def test_duplicate_update_id_does_not_replace_accepted_positions():
+def test_changed_duplicate_before_first_state_does_not_replace_accepted_positions():
     converter = FakeConverter()
     translator = GeoCoordinateTranslator(converter)
-    translator.order_to_map(make_order(
+    accepted = translator.order_to_map(make_order(
         "o", 1, [make_node("A", 0, LON0), make_node("B", 2, LON0 + 0.001)],
-        [make_edge("e1", 1, "A", "B")],
+        [make_edge("e1", 1, "A", "B", (LON0, LON0 + 0.001))],
     ))
-    translator.state_to_wgs84(make_state("o", 1))
+    # Same update id, changed content: the controller discards it.
     translator.order_to_map(make_order(
         "o", 1, [make_node("A", 0, LON0), make_node("B", 2, LON0 + 0.005)],
-        [make_edge("e1", 1, "A", "B")],
+        [make_edge("e1", 1, "A", "B", (LON0, LON0 + 0.005))],
     ))
     converter.ready = False
 
-    state = translator.state_to_wgs84(make_state("o", 1, [("B", 2)]))
+    state = translator.state_to_wgs84(
+        make_state("o", 1, accepted["nodes"], accepted["edges"])
+    )
 
-    assert state.node_states[0].node_position.x == LON0 + 0.001
+    assert state.node_states[1].node_position.x == LON0 + 0.001
+    assert [cp.x for cp in state.edge_states[0].trajectory.control_points] == [
+        LON0, LON0 + 0.001
+    ]
+
+
+def test_state_skipping_an_accepted_update_reports_its_coordinates():
+    converter = FakeConverter()
+    translator = GeoCoordinateTranslator(converter)
+    translator.order_to_map(make_order(
+        "o", 0, [make_node("A", 0, LON0), make_node("H", 2, LON0 + 0.001)],
+        [make_edge("e1", 1, "A", "H", (LON0, LON0 + 0.001))],
+    ))
+    # Update 1 moves H and its edge; update 2 only extends the base past C.
+    update_1 = translator.order_to_map(make_order(
+        "o", 1,
+        [make_node("A", 0, LON0), make_node("H", 2, LON0 + 0.0012),
+         make_node("C", 4, LON0 + 0.002)],
+        [make_edge("e1", 1, "A", "H", (LON0, LON0 + 0.0012)), make_edge("e2", 3, "H", "C")],
+    ))
+    update_2 = translator.order_to_map(make_order(
+        "o", 2, [make_node("C", 4, LON0 + 0.002), make_node("D", 6, LON0 + 0.003)],
+        [make_edge("e3", 5, "C", "D")],
+    ))
+    converter.ready = False
+
+    # First state seen after both updates were accepted.
+    state = translator.state_to_wgs84(make_state(
+        "o", 2,
+        [update_1["nodes"][1], update_2["nodes"][0], update_2["nodes"][1]],
+        [update_1["edges"][0]],
+    ))
+
+    assert [n.node_position.x for n in state.node_states] == [
+        LON0 + 0.0012, LON0 + 0.002, LON0 + 0.003
+    ]
+    assert [cp.x for cp in state.edge_states[0].trajectory.control_points] == [
+        LON0, LON0 + 0.0012
+    ]
 
 
 def test_rejected_new_orders_do_not_evict_active_order():
     converter = FakeConverter()
     translator = GeoCoordinateTranslator(converter)
-    translator.order_to_map(make_order(
+    active = translator.order_to_map(make_order(
         "active", 0, [make_node("A", 0, LON0), make_node("B", 2, LON0 + 0.001)],
         [make_edge("e1", 1, "A", "B")],
     ))
-    translator.state_to_wgs84(make_state("active", 0))
     for i in range(10):
         translator.order_to_map(make_order(
             f"rejected_{i}", 0, [make_node("B", 0, LON0 + 0.004)], [],
         ))
     converter.ready = False
 
-    state = translator.state_to_wgs84(make_state("active", 0, [("B", 2)]))
+    for _ in range(_UNREPORTED_GRACE_STATES + 1):
+        state = translator.state_to_wgs84(make_state("active", 0, [active["nodes"][1]]))
 
     assert state.node_states[0].node_position.x == LON0 + 0.001
+    assert {key[0] for key in translator._candidates} == {"active"}
 
 
 def test_stitched_base_entries_are_preserved():
     converter = FakeConverter()
     translator = GeoCoordinateTranslator(converter)
-    translator.order_to_map(make_order(
+    update_0 = translator.order_to_map(make_order(
         "o", 0, [make_node("A", 0, LON0), make_node("B", 2, LON0 + 0.001)],
         [make_edge("e1", 1, "A", "B", (LON0, LON0 + 0.001))],
     ))
-    translator.state_to_wgs84(make_state("o", 0))
-    translator.order_to_map(make_order(
+    update_1 = translator.order_to_map(make_order(
         "o", 1, [make_node("B", 2, LON0 + 0.001), make_node("C", 4, LON0 + 0.002)],
         [make_edge("e2", 3, "B", "C", (LON0 + 0.001, LON0 + 0.002))],
     ))
     converter.ready = False
 
-    state = translator.state_to_wgs84(
-        make_state("o", 1, [("A", 0), ("B", 2), ("C", 4)], [("e1", 1), ("e2", 3)])
-    )
+    state = translator.state_to_wgs84(make_state(
+        "o", 1, update_0["nodes"] + update_1["nodes"][1:], update_0["edges"] + update_1["edges"]
+    ))
 
     assert [n.node_position.x for n in state.node_states] == [
         LON0, LON0 + 0.001, LON0 + 0.002
@@ -355,31 +400,26 @@ def test_stitched_base_entries_are_preserved():
     ]
 
 
-def test_accepted_entries_no_longer_reported_are_dropped():
+def test_entries_no_longer_reported_are_dropped_after_grace_period():
     converter = FakeConverter()
     translator = GeoCoordinateTranslator(converter)
     translator.order_to_map(make_order(
         "o", 0, [make_node("A", 0, LON0), make_node("B", 2, LON0 + 0.001)],
         [make_edge("e1", 1, "A", "B")],
     ))
-    translator.state_to_wgs84(make_state("o", 0, [("A", 0), ("B", 2)], [("e1", 1)]))
-    translator.order_to_map(make_order(
-        "o", 1, [make_node("B", 2, LON0 + 0.001), make_node("C", 4, LON0 + 0.002)],
-        [make_edge("e2", 3, "B", "C")],
-    ))
-    translator.state_to_wgs84(make_state("o", 1, [("C", 4)], [("e2", 3)]))
-    translator.order_to_map(make_order(
-        "o", 2, [make_node("C", 4, LON0 + 0.002), make_node("D", 6, LON0 + 0.003)],
-        [make_edge("e3", 5, "C", "D")],
+    update_1 = translator.order_to_map(make_order(
+        "o", 1, [make_node("B", 2, LON0 + 0.001), make_node("D", 4, LON0 + 0.003)],
+        [make_edge("e2", 3, "B", "D")],
     ))
     converter.ready = False
 
-    state = translator.state_to_wgs84(make_state("o", 2, [("D", 6)], [("e3", 5)]))
+    for _ in range(_UNREPORTED_GRACE_STATES + 1):
+        state = translator.state_to_wgs84(
+            make_state("o", 1, update_1["nodes"][1:], update_1["edges"])
+        )
 
     assert state.node_states[0].node_position.x == LON0 + 0.003
-    # Only the newest update and the entries still reported remain.
-    assert set(translator._accepted_order["nodes"]) == {("C", 4), ("D", 6)}
-    assert set(translator._accepted_order["edges"]) == {("e3", 5)}
+    assert set(translator._candidates) == {("o", "node", "D", 4), ("o", "edge", "e2", 3)}
 
 
 def test_navsat_converter_measures_yaw_on_every_call():

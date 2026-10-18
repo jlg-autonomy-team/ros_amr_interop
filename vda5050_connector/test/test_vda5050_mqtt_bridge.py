@@ -586,29 +586,29 @@ def test_vda5050_mqtt_bridge_subscriptions(setup_rclpy, mocker, mock_mqtt_client
     mqtt_bridge = MQTTBridge()
     mqtt_bridge.create_subscription.assert_any_call(
         msg_type=OrderState,
-        topic="/uagv/v1/robots/robot_1/state",
+        topic="/uagv/v2/robots/robot_1/state",
         callback=mqtt_bridge._publish_state,
         qos_profile=10,
     )
     mqtt_bridge.create_subscription.assert_any_call(
         msg_type=Connection,
-        topic="/uagv/v1/robots/robot_1/connection",
+        topic="/uagv/v2/robots/robot_1/connection",
         callback=mqtt_bridge._publish_connection,
         qos_profile=10,
     )
     mqtt_bridge.create_subscription.assert_any_call(
         msg_type=Visualization,
-        topic="/uagv/v1/robots/robot_1/visualization",
+        topic="/uagv/v2/robots/robot_1/visualization",
         callback=mqtt_bridge._publish_visualization,
         qos_profile=10,
     )
 
     mqtt_bridge.create_publisher.assert_any_call(
-        msg_type=Order, topic="/uagv/v1/robots/robot_1/order", qos_profile=10
+        msg_type=Order, topic="/uagv/v2/robots/robot_1/order", qos_profile=10
     )
     mqtt_bridge.create_publisher.assert_any_call(
         msg_type=InstantActions,
-        topic="/uagv/v1/robots/robot_1/instantActions",
+        topic="/uagv/v2/robots/robot_1/instantActions",
         qos_profile=10,
     )
 
@@ -738,6 +738,8 @@ def test_vda5050_mqtt_bridge_on_valid_vda5050_mqtt_messages(
     setup_rclpy, mocker, mock_mqtt_client, valid_msg, msg_type
 ):
     mqtt_bridge = MQTTBridge()
+    # These payloads cover the raw conversion paths (incl. v1), which the 2.0 schema rejects.
+    mqtt_bridge.enable_vda5050_validation = False
     mocker.patch.object(mqtt_bridge, "_order_pub", return_value=MagicMock())
     mocker.patch.object(mqtt_bridge, "_instant_actions_pub", return_value=MagicMock())
 

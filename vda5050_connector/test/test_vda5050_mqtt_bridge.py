@@ -785,11 +785,11 @@ class FakeNavSatGeoConverter:
             for lon, lat in lon_lats
         ]
 
-    def map_to_lon_lat(self, x, y):
+    def map_to_lon_lat(self, x, y, timeout_sec=None):
         self._check_ready()
         return GEO_LON0 + x / GEO_METERS_PER_DEG, GEO_LAT0 + y / GEO_METERS_PER_DEG
 
-    def enu_to_map_yaw(self, lon, lat):
+    def enu_to_map_yaw(self, lon, lat, timeout_sec=None):
         self._check_ready()
         return 0.0
 

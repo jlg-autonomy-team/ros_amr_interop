@@ -30,6 +30,8 @@
 
 import json
 import math
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -81,14 +83,14 @@ class FakeConverter:
             poses.append((c * e - s * n, s * e + c * n, fake_enu_to_map_yaw(lon, lat)))
         return poses
 
-    def map_to_lon_lat(self, x, y):
+    def map_to_lon_lat(self, x, y, timeout_sec=None):
         if not self.ready:
             raise GeoConversionError("not ready")
         c, s = math.cos(MAP_YAW), math.sin(MAP_YAW)
         e, n = c * x - s * y, s * x + c * y
         return LON0 + e / METERS_PER_DEG, LAT0 + n / METERS_PER_DEG
 
-    def enu_to_map_yaw(self, lon, lat):
+    def enu_to_map_yaw(self, lon, lat, timeout_sec=None):
         return fake_enu_to_map_yaw(lon, lat)
 
 
@@ -460,7 +462,7 @@ def test_entries_no_longer_reported_are_dropped_after_grace_period():
 def test_navsat_converter_measures_yaw_on_every_call():
     converter = NavSatGeoConverter.__new__(NavSatGeoConverter)
     yaws = iter([0.1, 0.2])
-    converter.lon_lat_to_map = lambda lon_lats: [(0.0, 0.0, next(yaws))]
+    converter.lon_lat_to_map = lambda lon_lats, timeout_sec=None: [(0.0, 0.0, next(yaws))]
 
     assert converter.enu_to_map_yaw(LON0, LAT0) == 0.1
     # e.g. after a SetDatum call the next message must use the new transform.
@@ -472,7 +474,7 @@ def test_nan_to_ll_result_reports_position_as_not_initialized():
     converter._to_ll_client = None
     converter._to_ll_type = SimpleNamespace(Request=SimpleNamespace)
     converter._point_type = SimpleNamespace
-    converter._call = lambda client, request: SimpleNamespace(
+    converter._call = lambda client, request, timeout_sec=None: SimpleNamespace(
         ll_point=SimpleNamespace(latitude=math.nan, longitude=math.nan)
     )
     visualization = Visualization()
@@ -490,12 +492,17 @@ def test_nan_to_ll_result_reports_position_as_not_initialized():
 
 
 class FakeFuture:
-    def __init__(self, response, completes):
+    def __init__(self, response, completes, delay_sec=0.0):
         self._response = response
         self._completes = completes
+        self._delay_sec = delay_sec
 
     def add_done_callback(self, callback):
-        if self._completes:
+        if not self._completes:
+            return
+        if self._delay_sec:
+            threading.Timer(self._delay_sec, callback, [self]).start()
+        else:
             callback(self)
 
     def result(self):
@@ -507,10 +514,11 @@ class FakeClient:
 
     srv_name = "fake_service"
 
-    def __init__(self, respond=lambda request: None, ready=True, completes=True):
+    def __init__(self, respond=lambda request: None, ready=True, completes=True, delay_sec=0.0):
         self.respond = respond
         self.ready = ready
         self.completes = completes
+        self.delay_sec = delay_sec
         self.requests = []
         self.removed = []
 
@@ -519,7 +527,7 @@ class FakeClient:
 
     def call_async(self, request):
         self.requests.append(request)
-        return FakeFuture(self.respond(request), self.completes)
+        return FakeFuture(self.respond(request), self.completes, self.delay_sec)
 
     def remove_pending_request(self, future):
         self.removed.append(future)
@@ -543,6 +551,33 @@ def make_navsat_converter(from_ll_array_client, timeout_sec=1.0):
     converter._from_ll_array_type = SimpleNamespace(Request=SimpleNamespace)
     converter._from_ll_array_client = from_ll_array_client
     return converter
+
+
+def test_conversion_budget_caps_service_waits():
+    to_ll_client = FakeClient(
+        respond=lambda request: SimpleNamespace(
+            ll_point=SimpleNamespace(latitude=LAT0, longitude=LON0)
+        ),
+        delay_sec=0.2,
+    )
+    from_ll_array_client = FakeClient(completes=False)
+    converter = make_navsat_converter(from_ll_array_client, timeout_sec=5.0)
+    converter._to_ll_client = to_ll_client
+    converter._to_ll_type = SimpleNamespace(Request=SimpleNamespace)
+    converter._point_type = SimpleNamespace
+    translator = GeoCoordinateTranslator(converter, conversion_budget_sec=0.3)
+    visualization = Visualization()
+    visualization.agv_position.position_initialized = True
+
+    start = time.monotonic()
+    wgs84 = translator.visualization_to_wgs84(visualization)
+    elapsed = time.monotonic() - start
+
+    # Slow toLL succeeds, stalled fromLLArray only gets what is left of the 0.3 s budget.
+    assert len(to_ll_client.requests) == 1
+    assert len(from_ll_array_client.removed) == 1
+    assert elapsed < 0.5
+    assert not wgs84.agv_position.position_initialized
 
 
 def test_call_returns_service_response():
@@ -836,7 +871,7 @@ class CountingConverter(FakeConverter):
         super().__init__(ready)
         self.calls = 0
 
-    def map_to_lon_lat(self, x, y):
+    def map_to_lon_lat(self, x, y, timeout_sec=None):
         self.calls += 1
         return super().map_to_lon_lat(x, y)
 

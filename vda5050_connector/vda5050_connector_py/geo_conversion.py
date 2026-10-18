@@ -114,24 +114,26 @@ class NavSatGeoConverter:
         )
         self._to_ll_client = node.create_client(ToLL, "toLL", callback_group=callback_group)
 
-    def _call(self, client, request):
+    def _call(self, client, request, timeout_sec: float = None):
         if not client.service_is_ready():
             raise GeoConversionError(f"Service '{client.srv_name}' is not available")
 
+        if timeout_sec is None or timeout_sec > self._timeout_sec:
+            timeout_sec = self._timeout_sec
         done = threading.Event()
         future = client.call_async(request)
         future.add_done_callback(lambda _: done.set())
-        if not done.wait(self._timeout_sec):
+        if not done.wait(timeout_sec):
             client.remove_pending_request(future)
             raise GeoConversionError(
-                f"Service '{client.srv_name}' did not respond within {self._timeout_sec}s"
+                f"Service '{client.srv_name}' did not respond within {timeout_sec:.3f}s"
             )
         result = future.result()
         if result is None:
             raise GeoConversionError(f"Service '{client.srv_name}' call failed")
         return result
 
-    def lon_lat_to_map(self, lon_lats: list) -> list:
+    def lon_lat_to_map(self, lon_lats: list, timeout_sec: float = None) -> list:
         """
         Convert (lon, lat) pairs to the map frame.
 
@@ -153,7 +155,7 @@ class NavSatGeoConverter:
             for lon, lat in lon_lats
         ]
 
-        response = self._call(self._from_ll_array_client, request)
+        response = self._call(self._from_ll_array_client, request, timeout_sec)
         # navsat_transform answers with an empty array (or zeros) until its transform is ready.
         if len(response.map_points) != len(request.ll_points):
             raise GeoConversionError("navsat_transform is not ready (datum/transform unavailable)")
@@ -173,11 +175,11 @@ class NavSatGeoConverter:
 
         return poses
 
-    def map_to_lon_lat(self, x: float, y: float) -> tuple:
+    def map_to_lon_lat(self, x: float, y: float, timeout_sec: float = None) -> tuple:
         """Convert a map (x, y) point to (lon, lat)."""
         request = self._to_ll_type.Request()
         request.map_point = self._point_type(x=x, y=y, z=0.0)
-        ll_point = self._call(self._to_ll_client, request).ll_point
+        ll_point = self._call(self._to_ll_client, request, timeout_sec).ll_point
         if ll_point.latitude == 0.0 and ll_point.longitude == 0.0:
             raise GeoConversionError("navsat_transform is not ready (datum/transform unavailable)")
         # NaN/out-of-range results (e.g. from a NaN pose) are a robot-side failure, not bad input.
@@ -187,10 +189,10 @@ class NavSatGeoConverter:
             raise GeoConversionError(f"toLL returned an invalid result: {ex}") from ex
         return ll_point.longitude, ll_point.latitude
 
-    def enu_to_map_yaw(self, lon: float, lat: float) -> float:
+    def enu_to_map_yaw(self, lon: float, lat: float, timeout_sec: float = None) -> float:
         """Yaw offset [rad] to add to an ENU heading to obtain a map-frame heading."""
         # Measured on every call so a datum change or navsat restart is picked up immediately.
-        return self.lon_lat_to_map([(lon, lat)])[0][2]
+        return self.lon_lat_to_map([(lon, lat)], timeout_sec)[0][2]
 
 
 class GeoCoordinateTranslator:
@@ -408,15 +410,15 @@ class GeoCoordinateTranslator:
 
     def _convert(self, function, *args):
         # One unresponsive service must not cost a full timeout per uncached point.
-        if self._skip_conversions or (
-            self._conversion_deadline is not None
-            and time.monotonic() > self._conversion_deadline
-        ):
+        remaining = None
+        if self._conversion_deadline is not None:
+            remaining = self._conversion_deadline - time.monotonic()
+        if self._skip_conversions or (remaining is not None and remaining <= 0.0):
             raise GeoConversionError(
                 "skipped: an earlier conversion for this message failed or ran out of time"
             )
         try:
-            return function(*args)
+            return function(*args, timeout_sec=remaining)
         except GeoConversionError:
             self._skip_conversions = True
             raise

@@ -55,6 +55,9 @@ COORDINATE_SYSTEM_WGS84 = "wgs84"
 SUPPORTED_COORDINATE_SYSTEMS = (COORDINATE_SYSTEM_CARTESIAN, COORDINATE_SYSTEM_WGS84)
 
 INIT_POSITION_ACTION = "initPosition"
+_INIT_POSITION_COORDINATE_KEYS = ("x", "y", "theta")
+# Marks outbound coordinates that could not be converted; see drop_unknown_positions().
+_UNKNOWN = math.nan
 
 # Roughly 11 m north; used to measure the map-frame direction of true north.
 _NORTH_PROBE_DEG = 1e-4
@@ -252,7 +255,8 @@ class GeoCoordinateTranslator:
             edge["orientation"] = normalize_angle(float(edge["orientation"]) + yaw)
 
         for element in order.get("nodes", []) + order.get("edges", []):
-            self._init_position_actions_to_map(element.get("actions", []))
+            for action in element.get("actions", []):
+                self._init_position_action_to_map(action)
 
         self._remember_candidates(
             order.get("order_id", ""),
@@ -279,28 +283,46 @@ class GeoCoordinateTranslator:
         """Convert initPosition parameters of a snake_case instantActions dict to the map frame."""
         instant_actions = copy.deepcopy(instant_actions)
         actions_field = "instant_actions" if "instant_actions" in instant_actions else "actions"
-        self._init_position_actions_to_map(instant_actions.get(actions_field, []))
+        for action in instant_actions.get(actions_field, []):
+            try:
+                self._init_position_action_to_map(action)
+            except GeoConversionError as ex:
+                # Other actions (e.g. cancelOrder) must still go through; without coordinates
+                # the adapter fails this initPosition and reports it in the action state.
+                action["action_parameters"] = [
+                    p for p in action.get("action_parameters", [])
+                    if p["key"] not in _INIT_POSITION_COORDINATE_KEYS
+                ]
+                if self._logger:
+                    self._logger.error(
+                        f"Forwarding initPosition '{action.get('action_id')}' without "
+                        f"coordinates: cannot convert WGS84 coordinates to the map frame: {ex}"
+                    )
         return instant_actions
 
-    def _init_position_actions_to_map(self, actions: list):
-        for action in actions:
-            if action.get("action_type") != INIT_POSITION_ACTION:
-                continue
-            params = {p["key"]: p for p in action.get("action_parameters", [])}
-            if "x" not in params or "y" not in params:
-                continue
-            (x, y), yaw = self._lon_lat_to_map_single(
-                float(params["x"]["value"]), float(params["y"]["value"])
-            )
-            params["x"]["value"] = x
-            params["y"]["value"] = y
-            if "theta" in params:
-                params["theta"]["value"] = normalize_angle(float(params["theta"]["value"]) + yaw)
+    def _init_position_action_to_map(self, action: dict):
+        if action.get("action_type") != INIT_POSITION_ACTION:
+            return
+        params = {p["key"]: p for p in action.get("action_parameters", [])}
+        if "x" not in params or "y" not in params:
+            return
+        (x, y), yaw = self._lon_lat_to_map_single(
+            float(params["x"]["value"]), float(params["y"]["value"])
+        )
+        params["x"]["value"] = x
+        params["y"]["value"] = y
+        if "theta" in params:
+            params["theta"]["value"] = normalize_angle(float(params["theta"]["value"]) + yaw)
 
     # Outbound (robot -> fleet manager)
 
     def state_to_wgs84(self, state):
-        """Return a copy of an OrderState ROS message with WGS84 coordinates."""
+        """
+        Return a copy of an OrderState ROS message with WGS84 coordinates.
+
+        Node positions and control points that cannot be converted are set to NaN; serialize
+        the result through drop_unknown_positions() so they are omitted instead of published.
+        """
         state = copy.deepcopy(state)
         self._agv_position_to_wgs84(state.agv_position)
 
@@ -322,13 +344,15 @@ class GeoCoordinateTranslator:
             self._prune_candidates(state)
 
         for node_state, (found, original_position) in zip(state.node_states, node_originals):
-            if found:
-                if original_position is not None:
-                    node_state.node_position.x = float(original_position["x"])
-                    node_state.node_position.y = float(original_position["y"])
-                    node_state.node_position.theta = float(original_position.get("theta", 0.0))
-            else:
+            if not found:
                 self._node_position_to_wgs84(node_state.node_position)
+            elif original_position is None:
+                # The order had no position for this node; zeros would read as 0°/0°.
+                _mark_unknown(node_state.node_position)
+            else:
+                node_state.node_position.x = float(original_position["x"])
+                node_state.node_position.y = float(original_position["y"])
+                node_state.node_position.theta = float(original_position.get("theta", 0.0))
 
         for edge_state, (found, original_control_points) in zip(
             state.edge_states, edge_originals
@@ -368,10 +392,8 @@ class GeoCoordinateTranslator:
                 position.x, position.y, position.theta
             )
         except GeoConversionError as ex:
-            self._warn(f"Reporting node position as zero: {ex}")
-            position.x = 0.0
-            position.y = 0.0
-            position.theta = 0.0
+            self._warn(f"Omitting node position from the state: {ex}")
+            _mark_unknown(position)
 
     def _control_point_to_wgs84(self, control_point):
         try:
@@ -379,9 +401,8 @@ class GeoCoordinateTranslator:
                 control_point.x, control_point.y
             )
         except GeoConversionError as ex:
-            self._warn(f"Reporting trajectory control point as zero: {ex}")
-            control_point.x = 0.0
-            control_point.y = 0.0
+            self._warn(f"Omitting edge trajectory from the state: {ex}")
+            _mark_unknown(control_point)
 
     def _warn(self, message: str):
         if self._logger:
@@ -473,3 +494,30 @@ def _edge_map_value(control_points) -> tuple:
         (float(cp["x"]), float(cp["y"])) if isinstance(cp, dict) else (cp.x, cp.y)
         for cp in control_points
     )
+
+
+def _mark_unknown(point):
+    point.x = _UNKNOWN
+    point.y = _UNKNOWN
+    if hasattr(point, "theta"):
+        point.theta = _UNKNOWN
+
+
+def _is_known(point: dict) -> bool:
+    return math.isfinite(point["x"]) and math.isfinite(point["y"])
+
+
+def drop_unknown_positions(state: dict) -> dict:
+    """
+    Remove unknown coordinates from a state from state_to_wgs84(), as a snake_case dict.
+
+    Both fields are optional in the VDA5050 state, so omitting them is valid; publishing them
+    would put the node or trajectory at 0°/0° (or NaN, which is not valid JSON).
+    """
+    for node_state in state["node_states"]:
+        if not _is_known(node_state["node_position"]):
+            del node_state["node_position"]
+    for edge_state in state["edge_states"]:
+        if not all(_is_known(cp) for cp in edge_state["trajectory"]["control_points"]):
+            del edge_state["trajectory"]
+    return state

@@ -65,6 +65,9 @@ from vda5050_connector_py.geo_conversion import SUPPORTED_COORDINATE_SYSTEMS
 from vda5050_connector_py.geo_conversion import GeoConversionError
 from vda5050_connector_py.geo_conversion import NavSatGeoConverter
 from vda5050_connector_py.geo_conversion import GeoCoordinateTranslator
+from vda5050_connector_py.geo_conversion import drop_unknown_positions
+from vda5050_connector_py.utils import json_snake_to_camel_case
+from rosidl_runtime_py import message_to_ordereddict
 # JLG_CHANGES_END
 from vda5050_connector_py.utils import convert_ros_message_to_json
 from vda5050_connector_py.utils import get_vda5050_ts
@@ -715,6 +718,11 @@ class MQTTBridge(Node):
 
         """
         json_msg = convert_ros_message_to_json(msg)
+        # JLG_CHANGES_START
+        self._publish_json_to_topic(json_msg, topic)
+
+    def _publish_json_to_topic(self, json_msg: str, topic: str):
+        # JLG_CHANGES_END
         self.logger.debug(f"Publishing MQTT message to topic {topic}: {json_msg}")
         # JLG_CHANGES_START
         result = self.mqtt_client.publish(topic, json_msg)
@@ -748,6 +756,14 @@ class MQTTBridge(Node):
             major_version=self.vda5050_version_alias,
             interface_name=self._interface_name
         )
+        # JLG_CHANGES_START
+        if self._geo_translator is not None:
+            state = drop_unknown_positions(message_to_ordereddict(msg))
+            self._publish_json_to_topic(
+                json.dumps(json_snake_to_camel_case(json.dumps(state))), topic
+            )
+            return
+        # JLG_CHANGES_END
         self._publish_to_topic(msg, topic)
 
     def _publish_connection(self, msg: VDAConnection):

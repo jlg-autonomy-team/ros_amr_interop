@@ -28,13 +28,16 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import json
 import math
 from types import SimpleNamespace
 
 import pytest
+from rosidl_runtime_py import message_to_ordereddict
 
 from vda5050_connector_py.geo_conversion import _MAX_UNCONFIRMED_CANDIDATES
 from vda5050_connector_py.geo_conversion import _UNREPORTED_GRACE_STATES
+from vda5050_connector_py.geo_conversion import drop_unknown_positions
 from vda5050_connector_py.geo_conversion import GeoConversionError
 from vda5050_connector_py.geo_conversion import GeoCoordinateTranslator
 from vda5050_connector_py.geo_conversion import NavSatGeoConverter
@@ -235,7 +238,7 @@ def test_order_update_converts_stitch_node_identically():
 
 
 # In the state tests below the converter is disabled after the orders are translated, so a
-# reported coordinate can only come from a stored original (fallback conversion yields zeros).
+# reported coordinate can only come from a stored original (fallback conversion fails).
 
 
 def test_rejected_stitch_update_does_not_replace_accepted_positions():
@@ -719,6 +722,63 @@ def test_instant_actions_init_position_to_map():
     assert params["theta"] == pytest.approx(1.0 + fake_enu_to_map_yaw(LON0 + 0.0001, LAT0))
     assert params["mapId"] == "WGS84"
     assert converted["actions"][1] == instant_actions["actions"][1]
+
+
+def test_failed_init_position_keeps_other_instant_actions():
+    cancel_order = {"action_type": "cancelOrder", "action_id": "a1", "blocking_type": "HARD"}
+    init_position = {
+        "action_type": "initPosition",
+        "action_id": "a2",
+        "blocking_type": "HARD",
+        "action_parameters": [
+            {"key": "x", "value": LON0},
+            {"key": "y", "value": LAT0},
+            {"key": "theta", "value": 1.0},
+            {"key": "mapId", "value": "WGS84"},
+        ],
+    }
+    translator = GeoCoordinateTranslator(FakeConverter(ready=False))
+
+    converted = translator.instant_actions_to_map(
+        {"actions": [cancel_order, init_position]}
+    )
+
+    assert converted["actions"][0] == cancel_order
+    # Unconverted degrees are never forwarded; the adapter fails the action instead.
+    assert converted["actions"][1]["action_parameters"] == [{"key": "mapId", "value": "WGS84"}]
+
+
+def test_unconvertible_state_positions_are_omitted():
+    translator = GeoCoordinateTranslator(FakeConverter(ready=False))
+    state = OrderState(order_id="unknown")
+    state.node_states = [NodeState(node_id="n1", sequence_id=0, released=True)]
+    state.node_states[0].node_position.x = 10.0
+    state.edge_states = [EdgeState(edge_id="e1", sequence_id=1, released=True)]
+    state.edge_states[0].trajectory.control_points = [ControlPoint(x=1.0, y=2.0)]
+
+    wgs84 = message_to_ordereddict(translator.state_to_wgs84(state))
+    serialized = drop_unknown_positions(wgs84)
+
+    assert "node_position" not in serialized["node_states"][0]
+    assert "trajectory" not in serialized["edge_states"][0]
+    assert serialized["node_states"][0]["node_id"] == "n1"
+    assert serialized["edge_states"][0]["edge_id"] == "e1"
+    assert "NaN" not in json.dumps(serialized)
+
+
+def test_known_state_positions_are_kept():
+    translator = GeoCoordinateTranslator(FakeConverter())
+    state = OrderState(order_id="unknown")
+    state.node_states = [NodeState(node_id="n1", sequence_id=0)]
+    state.edge_states = [EdgeState(edge_id="e1", sequence_id=1)]
+    state.edge_states[0].trajectory.control_points = [ControlPoint()]
+
+    serialized = drop_unknown_positions(message_to_ordereddict(translator.state_to_wgs84(state)))
+
+    assert serialized["node_states"][0]["node_position"]["x"] == pytest.approx(LON0)
+    assert serialized["edge_states"][0]["trajectory"]["control_points"][0]["y"] == (
+        pytest.approx(LAT0)
+    )
 
 
 def test_state_to_wgs84_round_trip_restores_original_order_positions():

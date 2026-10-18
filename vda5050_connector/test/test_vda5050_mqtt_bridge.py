@@ -55,6 +55,8 @@ from vda5050_msgs.msg import Connection
 from vda5050_msgs.msg import Visualization
 from vda5050_msgs.msg import InstantActions
 from vda5050_msgs.msg import NodeState
+from vda5050_msgs.msg import EdgeState
+from vda5050_msgs.msg import ControlPoint
 
 
 def get_order(order_id=str(uuid4())):
@@ -896,26 +898,63 @@ def test_wgs84_order_is_published_in_map_frame(make_wgs84_bridge, enable_validat
 
 
 @pytest.mark.parametrize("enable_validation", [True, False], ids=["validation", "no-validation"])
-@pytest.mark.parametrize(
-    "topic,payload",
-    [("order", wgs84_order()), ("instantActions", wgs84_init_position())],
-    ids=["order", "instantActions"],
-)
-def test_wgs84_message_dropped_without_dtc_when_navsat_unavailable(
-    make_wgs84_bridge, mocker, enable_validation, topic, payload
+def test_wgs84_order_dropped_without_dtc_when_navsat_unavailable(
+    make_wgs84_bridge, mocker, enable_validation
 ):
     bridge = make_wgs84_bridge(enable_validation)
     bridge._geo_translator._converter.ready = False
     log_error = mocker.spy(bridge.logger, "error")
 
-    bridge.on_message_mqtt(bridge.mqtt_client, None, wgs84_message(topic, payload))
+    bridge.on_message_mqtt(bridge.mqtt_client, None, wgs84_message("order", wgs84_order()))
 
     bridge._order_pub.publish.assert_not_called()
-    bridge._instant_actions_pub.publish.assert_not_called()
     bridge.call_dtc_force_latch.assert_not_called()
     assert any(
         "cannot convert WGS84 coordinates" in call.args[0] for call in log_error.call_args_list
     )
+
+
+@pytest.mark.parametrize("enable_validation", [True, False], ids=["validation", "no-validation"])
+def test_wgs84_instant_actions_forwarded_when_init_position_cannot_be_converted(
+    make_wgs84_bridge, mocker, enable_validation
+):
+    bridge = make_wgs84_bridge(enable_validation)
+    bridge._geo_translator._converter.ready = False
+    log_error = mocker.spy(bridge.logger, "error")
+    payload = wgs84_init_position()
+    payload["actions"].insert(
+        0, {"actionType": "cancelOrder", "actionId": "a0", "blockingType": "HARD"}
+    )
+
+    bridge.on_message_mqtt(bridge.mqtt_client, None, wgs84_message("instantActions", payload))
+
+    bridge._instant_actions_pub.publish.assert_called_once()
+    actions = bridge._instant_actions_pub.publish.call_args.kwargs["msg"].actions
+    assert [a.action_type for a in actions] == ["cancelOrder", "initPosition"]
+    assert actions[1].action_parameters == []
+    bridge.call_dtc_force_latch.assert_not_called()
+    assert any("Forwarding initPosition 'a1'" in call.args[0] for call in log_error.call_args_list)
+
+
+def test_wgs84_state_omits_positions_that_cannot_be_converted(
+    make_wgs84_bridge, mock_mqtt_client
+):
+    bridge = make_wgs84_bridge()
+    bridge._geo_translator._converter.ready = False
+    state = OrderState(order_id="unknown_order")
+    state.node_states = [NodeState(node_id="n1", sequence_id=0, released=True)]
+    state.edge_states = [EdgeState(edge_id="e1", sequence_id=1, released=True)]
+    state.edge_states[0].trajectory.control_points = [ControlPoint(x=1.0, y=2.0)]
+
+    bridge._publish_state(state)
+
+    _, raw_payload = mock_mqtt_client.publish.call_args.args
+    payload = json.loads(raw_payload)
+    assert "NaN" not in raw_payload
+    assert payload["nodeStates"] == [{"nodeId": "n1", "sequenceId": 0, "nodeDescription": "",
+                                      "released": True}]
+    assert "trajectory" not in payload["edgeStates"][0]
+    assert payload["edgeStates"][0]["edgeId"] == "e1"
 
 
 def test_wgs84_out_of_range_coordinates_latch_invalid_order_dtc(make_wgs84_bridge):

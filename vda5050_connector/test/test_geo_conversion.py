@@ -795,6 +795,25 @@ def test_unconvertible_state_positions_are_omitted():
     assert "NaN" not in json.dumps(serialized)
 
 
+@pytest.mark.parametrize("theta", [math.inf, math.nan], ids=["inf", "nan"])
+def test_non_finite_heading_takes_conversion_fallback(theta):
+    translator = GeoCoordinateTranslator(FakeConverter())
+    state = OrderState(order_id="unknown")
+    state.agv_position.position_initialized = True
+    state.agv_position.x = 10.0
+    state.agv_position.theta = theta
+    state.node_states = [NodeState(node_id="n1", sequence_id=0)]
+    state.node_states[0].node_position.theta = theta
+
+    wgs84 = translator.state_to_wgs84(state)
+    serialized = drop_unknown_positions(message_to_ordereddict(wgs84))
+
+    assert not wgs84.agv_position.position_initialized
+    assert wgs84.agv_position.theta == 0.0
+    assert "node_position" not in serialized["node_states"][0]
+    json.dumps(serialized, allow_nan=False)
+
+
 def test_known_state_positions_are_kept():
     translator = GeoCoordinateTranslator(FakeConverter())
     state = OrderState(order_id="unknown")

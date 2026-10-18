@@ -387,6 +387,9 @@ class GeoCoordinateTranslator:
         return (x, y), yaw
 
     def _pose_to_wgs84(self, x: float, y: float, theta: float) -> tuple:
+        # Robot-side NaN/inf poses must take the not-initialized/omission fallback.
+        if not all(math.isfinite(v) for v in (x, y, theta)):
+            raise GeoConversionError(f"Non-finite map pose (x={x}, y={y}, theta={theta})")
         lon, lat = self._converter.map_to_lon_lat(x, y)
         yaw = self._converter.enu_to_map_yaw(lon, lat)
         return lon, lat, normalize_angle(theta - yaw)

@@ -1027,6 +1027,28 @@ def test_wgs84_state_reports_uninitialized_position_when_navsat_unavailable(
     assert payload["agvPosition"]["x"] == 0.0
 
 
+@pytest.mark.parametrize("theta", [float("inf"), float("nan")], ids=["inf", "nan"])
+def test_wgs84_non_finite_heading_published_as_uninitialized(
+    make_wgs84_bridge, mock_mqtt_client, theta
+):
+    bridge = make_wgs84_bridge()
+    state = OrderState()
+    state.agv_position.position_initialized = True
+    state.agv_position.x = 10.0
+    state.agv_position.theta = theta
+    visualization = Visualization()
+    visualization.agv_position.position_initialized = True
+    visualization.agv_position.theta = theta
+
+    for publish, msg in ((bridge._publish_state, state),
+                         (bridge._publish_visualization, visualization)):
+        publish(msg)
+
+        _, raw_payload = mock_mqtt_client.publish.call_args.args
+        payload = json.loads(raw_payload, parse_constant=pytest.fail)
+        assert payload["agvPosition"]["positionInitialized"] is False
+
+
 def test_wgs84_visualization_is_published_in_wgs84(make_wgs84_bridge, mock_mqtt_client):
     bridge = make_wgs84_bridge()
     visualization = Visualization()

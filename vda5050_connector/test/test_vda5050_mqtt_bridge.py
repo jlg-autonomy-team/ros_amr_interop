@@ -938,11 +938,17 @@ def test_wgs84_instant_actions_forwarded_when_init_position_cannot_be_converted(
     assert any("Forwarding initPosition 'a1'" in call.args[0] for call in log_error.call_args_list)
 
 
-@pytest.mark.parametrize("x", [200.0, "abc"], ids=["out-of-range", "non-numeric"])
-def test_wgs84_invalid_init_position_does_not_suppress_cancel_order(make_wgs84_bridge, x):
+@pytest.mark.parametrize(
+    "index,value",
+    [(0, 200.0), (0, "abc"), (2, "NaN")],
+    ids=["out-of-range-x", "non-numeric-x", "nan-theta"],
+)
+def test_wgs84_invalid_init_position_does_not_suppress_cancel_order(
+    make_wgs84_bridge, index, value
+):
     bridge = make_wgs84_bridge()
     payload = wgs84_init_position()
-    payload["actions"][0]["actionParameters"][0]["value"] = x
+    payload["actions"][0]["actionParameters"][index]["value"] = value
     payload["actions"].insert(
         0, {"actionType": "cancelOrder", "actionId": "a0", "blockingType": "HARD"}
     )

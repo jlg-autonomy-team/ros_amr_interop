@@ -634,6 +634,30 @@ def test_lon_lat_to_map_rejects_invalid_coordinates_without_calling_service():
     assert client.requests == []
 
 
+@pytest.mark.parametrize("bad_heading", [math.nan, math.inf, "NaN"], ids=["nan", "inf", "nan-str"])
+@pytest.mark.parametrize("field", ["node_theta", "edge_orientation", "init_position_theta"])
+def test_order_to_map_rejects_non_finite_heading(field, bad_heading):
+    order = get_order()
+    if field == "node_theta":
+        order["nodes"][0]["node_position"]["theta"] = bad_heading
+    elif field == "edge_orientation":
+        order["edges"][0]["orientation"] = bad_heading
+    else:
+        order["nodes"][0]["actions"] = [{
+            "action_type": "initPosition",
+            "action_id": "a1",
+            "blocking_type": "HARD",
+            "action_parameters": [
+                {"key": "x", "value": LON0},
+                {"key": "y", "value": LAT0},
+                {"key": "theta", "value": bad_heading},
+            ],
+        }]
+
+    with pytest.raises(ValueError):
+        GeoCoordinateTranslator(FakeConverter()).order_to_map(order)
+
+
 def test_order_to_map_rejects_global_edge_without_start_node_position():
     order = get_order()
     del order["nodes"][0]["node_position"]
@@ -753,8 +777,19 @@ def test_failed_init_position_keeps_other_instant_actions():
 
 @pytest.mark.parametrize(
     "x,theta",
-    [(200.0, 1.0), ("abc", 1.0), ([1, 2], 1.0), (LON0, "abc")],
-    ids=["out-of-range", "non-numeric", "array", "non-numeric-theta"],
+    [
+        (200.0, 1.0),
+        ("abc", 1.0),
+        ([1, 2], 1.0),
+        ("NaN", 1.0),
+        (LON0, "abc"),
+        (LON0, "NaN"),
+        (LON0, "inf"),
+    ],
+    ids=[
+        "out-of-range", "non-numeric", "array", "nan-x",
+        "non-numeric-theta", "nan-theta", "inf-theta",
+    ],
 )
 def test_invalid_init_position_parameters_keep_other_instant_actions(x, theta):
     cancel_order = {"action_type": "cancelOrder", "action_id": "a1", "blocking_type": "HARD"}

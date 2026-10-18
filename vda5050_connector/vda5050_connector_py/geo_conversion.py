@@ -83,6 +83,14 @@ def _validate_lon_lat(lon: float, lat: float):
         )
 
 
+def _heading_to_map(heading, enu_to_map_yaw: float) -> float:
+    # float() accepts "NaN"/"inf" and json.loads accepts NaN/Infinity tokens.
+    heading = float(heading)
+    if not math.isfinite(heading):
+        raise ValueError(f"Invalid heading: {heading}")
+    return normalize_angle(heading + enu_to_map_yaw)
+
+
 class NavSatGeoConverter:
     """Converts coordinates through robot_localization navsat_transform services."""
 
@@ -243,7 +251,7 @@ class GeoCoordinateTranslator:
                 node_yaws[node["node_id"]] = yaw
                 position = node["node_position"]
                 if "theta" in position:
-                    position["theta"] = normalize_angle(float(position["theta"]) + yaw)
+                    position["theta"] = _heading_to_map(position["theta"], yaw)
 
         for edge in global_edges:
             if edge["start_node_id"] not in node_yaws:
@@ -252,7 +260,7 @@ class GeoCoordinateTranslator:
                     "without a start node position"
                 )
             yaw = node_yaws[edge["start_node_id"]]
-            edge["orientation"] = normalize_angle(float(edge["orientation"]) + yaw)
+            edge["orientation"] = _heading_to_map(edge["orientation"], yaw)
 
         for element in order.get("nodes", []) + order.get("edges", []):
             for action in element.get("actions", []):
@@ -317,7 +325,7 @@ class GeoCoordinateTranslator:
         params["x"]["value"] = x
         params["y"]["value"] = y
         if "theta" in params:
-            params["theta"]["value"] = normalize_angle(float(params["theta"]["value"]) + yaw)
+            params["theta"]["value"] = _heading_to_map(params["theta"]["value"], yaw)
 
     # Outbound (robot -> fleet manager)
 

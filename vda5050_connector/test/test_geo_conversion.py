@@ -46,6 +46,7 @@ from vda5050_connector_py.geo_conversion import GeoConversionError
 from vda5050_connector_py.geo_conversion import GeoCoordinateTranslator
 from vda5050_connector_py.geo_conversion import NavSatGeoConverter
 from vda5050_connector_py.geo_conversion import normalize_angle
+from vda5050_connector_py.geo_conversion import order_for_validation
 from vda5050_msgs.msg import ControlPoint
 from vda5050_msgs.msg import EdgeState
 from vda5050_msgs.msg import NodeState
@@ -66,11 +67,13 @@ def fake_enu_to_map_yaw(lon, lat):
 
 
 def compass_to_map(heading, lon):
-    return normalize_angle(math.pi / 2.0 - heading + fake_enu_to_map_yaw(lon, LAT0))
+    return normalize_angle(
+        math.pi / 2.0 - math.radians(heading) + fake_enu_to_map_yaw(lon, LAT0)
+    )
 
 
 def map_to_compass(theta, lon):
-    return (math.pi / 2.0 - theta + fake_enu_to_map_yaw(lon, LAT0)) % math.tau
+    return math.degrees(math.pi / 2.0 - theta + fake_enu_to_map_yaw(lon, LAT0)) % 360.0
 
 
 class FakeConverter:
@@ -949,6 +952,28 @@ def test_non_finite_heading_takes_conversion_fallback(theta):
     json.dumps(serialized, allow_nan=False)
 
 
+def test_order_for_validation_wraps_compass_degrees_into_schema_range():
+    order = {
+        "nodes": [
+            {"nodePosition": {"theta": 270.0}},
+            {"nodePosition": {"theta": "abc"}},
+            {"nodeId": "no_position"},
+        ],
+        "edges": [
+            {"orientation": 180.0, "orientationType": "GLOBAL"},
+            {"orientation": 0.5, "orientationType": "TANGENTIAL"},
+        ],
+    }
+
+    validated = order_for_validation(order)
+
+    assert validated["nodes"][0]["nodePosition"]["theta"] == pytest.approx(-math.pi / 2.0)
+    assert validated["nodes"][1]["nodePosition"]["theta"] == "abc"
+    assert abs(validated["edges"][0]["orientation"]) == pytest.approx(math.pi)
+    assert validated["edges"][1]["orientation"] == 0.5
+    assert order["nodes"][0]["nodePosition"]["theta"] == 270.0
+
+
 def test_known_state_positions_are_kept():
     translator = GeoCoordinateTranslator(FakeConverter())
     state = OrderState(order_id="unknown")
@@ -1057,5 +1082,5 @@ def test_visualization_to_wgs84():
 
     assert wgs84.agv_position.x == pytest.approx(LON0)
     assert wgs84.agv_position.y == pytest.approx(LAT0)
-    # Compass pi/2 - theta - MAP_YAW = -0.05 wraps into [0, 2*pi).
-    assert wgs84.agv_position.theta == pytest.approx(math.tau - 0.05)
+    # Compass pi/2 - theta - MAP_YAW = -0.05 rad wraps into [0, 360).
+    assert wgs84.agv_position.theta == pytest.approx(360.0 - math.degrees(0.05))

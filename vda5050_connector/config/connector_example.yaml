@@ -7,7 +7,7 @@ mqtt_bridge:
     manufacturer_name: "robots"
     serial_number: "robot_1"
     # "cartesian" (default): x/y [m], theta [rad] in the robot map frame.
-    # "wgs84": x=longitude, y=latitude [deg], theta=compass heading [rad] (0=North, CW).
+    # "wgs84": x=longitude, y=latitude [deg], theta=compass heading [deg] (0=North, CW).
     #   Requires robot_localization navsat_transform (fromLLArray/toLL services).
     coordinate_system: "cartesian"
     geo_map_id: "" # wgs84 only: overrides agvPosition.mapId when not empty

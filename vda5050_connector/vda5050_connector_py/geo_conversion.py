@@ -35,8 +35,8 @@ In ``wgs84`` mode the fleet manager exchanges positions as:
 
 * ``x``: longitude [deg]
 * ``y``: latitude [deg]
-* ``theta`` (and GLOBAL edge ``orientation``): compass heading [rad], 0 = true North,
-  clockwise positive. Accepted as any finite value, reported in [0, 2*pi).
+* ``theta`` (and GLOBAL edge ``orientation``): compass heading [deg], 0 = true North,
+  clockwise positive. Accepted as any finite value, reported in [0, 360).
 
 Everything inside ROS keeps using metric coordinates in the robot ``map`` frame. The
 conversion relies on robot_localization's navsat_transform ``fromLLArray``/``toLL``
@@ -90,13 +90,13 @@ def _compass_to_map(heading, enu_to_map_yaw: float) -> float:
     heading = float(heading)
     if not math.isfinite(heading):
         raise ValueError(f"Invalid heading: {heading}")
-    return normalize_angle(math.pi / 2.0 - heading + enu_to_map_yaw)
+    return normalize_angle(math.pi / 2.0 - math.radians(heading) + enu_to_map_yaw)
 
 
 def _map_to_compass(theta: float, enu_to_map_yaw: float) -> float:
-    heading = (math.pi / 2.0 - theta + enu_to_map_yaw) % math.tau
-    # Float modulo of a tiny negative value rounds up to exactly tau.
-    return heading if heading < math.tau else 0.0
+    heading = math.degrees(math.pi / 2.0 - theta + enu_to_map_yaw) % 360.0
+    # Float modulo of a tiny negative value rounds up to exactly 360.
+    return heading if heading < 360.0 else 0.0
 
 
 class NavSatGeoConverter:
@@ -577,3 +577,29 @@ def drop_unknown_positions(state: dict) -> dict:
         if not all(_is_known(cp) for cp in edge_state["trajectory"]["control_points"]):
             del edge_state["trajectory"]
     return state
+
+
+def order_for_validation(order: dict) -> dict:
+    """
+    Copy of a camelCase WGS84 order with compass headings [deg] wrapped to radians.
+
+    The VDA5050 order schema limits node ``theta`` and edge ``orientation`` to [-pi, pi].
+    """
+    order = copy.deepcopy(order)
+    headings = [
+        (node["nodePosition"], "theta")
+        for node in order.get("nodes", [])
+        if isinstance(node, dict) and isinstance(node.get("nodePosition"), dict)
+    ] + [
+        (edge, "orientation")
+        for edge in order.get("edges", [])
+        if isinstance(edge, dict) and edge.get("orientationType") == "GLOBAL"
+    ]
+    for container, key in headings:
+        value = container.get(key)
+        # Anything else is left for the schema (wrong type) or _compass_to_map (non-finite).
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and (
+            math.isfinite(value)
+        ):
+            container[key] = normalize_angle(math.radians(value))
+    return order

@@ -837,7 +837,7 @@ def wgs84_message(topic, payload):
     return message
 
 
-def wgs84_order(lon=GEO_LON0 + 0.0001, theta=0.5):
+def wgs84_order(lon=GEO_LON0 + 0.0001, theta=30.0):
     return {
         "headerId": 1,
         "timestamp": "2026-10-16T03:51:52.799Z",
@@ -896,13 +896,13 @@ def test_wgs84_order_is_published_in_map_frame(make_wgs84_bridge, enable_validat
     position = bridge._order_pub.publish.call_args.kwargs["msg"].nodes[0].node_position
     assert position.x == pytest.approx(10.0)
     assert position.y == pytest.approx(0.0)
-    assert position.theta == pytest.approx(math.pi / 2.0 - 0.5)
+    assert position.theta == pytest.approx(math.radians(60.0))
     bridge.call_dtc_force_latch.assert_not_called()
 
 
 @pytest.mark.parametrize(
     "compass,map_theta",
-    [(0.0, math.pi / 2.0), (math.pi / 2.0, 0.0), (math.pi, -math.pi / 2.0)],
+    [(0.0, math.pi / 2.0), (90.0, 0.0), (180.0, -math.pi / 2.0)],
     ids=["north", "east", "south"],
 )
 def test_wgs84_order_compass_heading_to_enu_aligned_map(make_wgs84_bridge, compass, map_theta):
@@ -918,7 +918,7 @@ def test_wgs84_order_compass_heading_to_enu_aligned_map(make_wgs84_bridge, compa
 
 @pytest.mark.parametrize(
     "map_theta,compass",
-    [(math.pi / 2.0, 0.0), (0.0, math.pi / 2.0), (2.846, math.radians(286.936))],
+    [(math.pi / 2.0, 0.0), (0.0, 90.0), (2.846, 286.9362)],
     ids=["north", "east", "west-north-west"],
 )
 def test_wgs84_state_reports_compass_heading(
@@ -1049,7 +1049,7 @@ def test_wgs84_state_is_published_in_wgs84(make_wgs84_bridge, mock_mqtt_client):
     payload = published_payload(mock_mqtt_client)
     assert payload["agvPosition"]["x"] == pytest.approx(GEO_LON0 + 0.0001)
     assert payload["agvPosition"]["y"] == pytest.approx(GEO_LAT0)
-    assert payload["agvPosition"]["theta"] == pytest.approx(math.pi / 2.0 - 0.5)
+    assert payload["agvPosition"]["theta"] == pytest.approx(math.degrees(math.pi / 2.0 - 0.5))
     assert payload["agvPosition"]["mapId"] == "WGS84"
     assert payload["nodeStates"][0]["nodePosition"]["x"] == GEO_LON0 + 0.0001
     assert payload["nodeStates"][0]["nodePosition"]["y"] == GEO_LAT0

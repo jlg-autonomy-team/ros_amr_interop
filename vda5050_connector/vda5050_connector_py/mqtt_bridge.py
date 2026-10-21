@@ -66,6 +66,7 @@ from vda5050_connector_py.geo_conversion import GeoConversionError
 from vda5050_connector_py.geo_conversion import NavSatGeoConverter
 from vda5050_connector_py.geo_conversion import GeoCoordinateTranslator
 from vda5050_connector_py.geo_conversion import drop_unknown_positions
+from vda5050_connector_py.geo_conversion import order_for_validation
 from vda5050_connector_py.utils import json_snake_to_camel_case
 from rosidl_runtime_py import message_to_ordereddict
 # JLG_CHANGES_END
@@ -296,7 +297,7 @@ class MQTTBridge(Node):
         )
 
         # Coordinate system used in VDA5050 MQTT messages: "cartesian" (map frame, meters) or
-        # "wgs84" (x=longitude, y=latitude [deg], theta=compass heading [rad]).
+        # "wgs84" (x=longitude, y=latitude [deg], theta=compass heading [deg]).
         self.coordinate_system = read_str_parameter(
             self, "coordinate_system", COORDINATE_SYSTEM_CARTESIAN
         ).lower()
@@ -508,9 +509,10 @@ class MQTTBridge(Node):
 
             try:
                 if msg.topic.endswith("order"):
-                    order_validation = validate_vda5050_payload(
-                        "order", json.loads(msg.payload)
-                    )
+                    order_payload = json.loads(msg.payload)
+                    if self.uses_geographic_coordinates:
+                        order_payload = order_for_validation(order_payload)
+                    order_validation = validate_vda5050_payload("order", order_payload)
                     if order_validation:
                         self.logger.warn(f"❌ Invalid VDA5050 order message")
                         for loc, e in order_validation:

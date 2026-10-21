@@ -35,7 +35,8 @@ In ``wgs84`` mode the fleet manager exchanges positions as:
 
 * ``x``: longitude [deg]
 * ``y``: latitude [deg]
-* ``theta``: ENU yaw [rad], 0 = East, counter-clockwise positive, range [-pi, pi]
+* ``theta`` (and GLOBAL edge ``orientation``): compass heading [rad], 0 = true North,
+  clockwise positive. Accepted as any finite value, reported in [0, 2*pi).
 
 Everything inside ROS keeps using metric coordinates in the robot ``map`` frame. The
 conversion relies on robot_localization's navsat_transform ``fromLLArray``/``toLL``
@@ -84,12 +85,18 @@ def _validate_lon_lat(lon: float, lat: float):
         )
 
 
-def _heading_to_map(heading, enu_to_map_yaw: float) -> float:
+def _compass_to_map(heading, enu_to_map_yaw: float) -> float:
     # float() accepts "NaN"/"inf" and json.loads accepts NaN/Infinity tokens.
     heading = float(heading)
     if not math.isfinite(heading):
         raise ValueError(f"Invalid heading: {heading}")
-    return normalize_angle(heading + enu_to_map_yaw)
+    return normalize_angle(math.pi / 2.0 - heading + enu_to_map_yaw)
+
+
+def _map_to_compass(theta: float, enu_to_map_yaw: float) -> float:
+    heading = (math.pi / 2.0 - theta + enu_to_map_yaw) % math.tau
+    # Float modulo of a tiny negative value rounds up to exactly tau.
+    return heading if heading < math.tau else 0.0
 
 
 class NavSatGeoConverter:
@@ -260,7 +267,7 @@ class GeoCoordinateTranslator:
                 node_yaws[node["node_id"]] = yaw
                 position = node["node_position"]
                 if "theta" in position:
-                    position["theta"] = _heading_to_map(position["theta"], yaw)
+                    position["theta"] = _compass_to_map(position["theta"], yaw)
 
         for edge in global_edges:
             if edge["start_node_id"] not in node_yaws:
@@ -269,7 +276,7 @@ class GeoCoordinateTranslator:
                     "without a start node position"
                 )
             yaw = node_yaws[edge["start_node_id"]]
-            edge["orientation"] = _heading_to_map(edge["orientation"], yaw)
+            edge["orientation"] = _compass_to_map(edge["orientation"], yaw)
 
         for element in order.get("nodes", []) + order.get("edges", []):
             for action in element.get("actions", []):
@@ -334,7 +341,7 @@ class GeoCoordinateTranslator:
         params["x"]["value"] = x
         params["y"]["value"] = y
         if "theta" in params:
-            params["theta"]["value"] = _heading_to_map(params["theta"]["value"], yaw)
+            params["theta"]["value"] = _compass_to_map(params["theta"]["value"], yaw)
 
     # Outbound (robot -> fleet manager)
 
@@ -433,7 +440,7 @@ class GeoCoordinateTranslator:
             raise GeoConversionError(f"Non-finite map pose (x={x}, y={y}, theta={theta})")
         lon, lat = self._convert(self._converter.map_to_lon_lat, x, y)
         yaw = self._convert(self._converter.enu_to_map_yaw, lon, lat)
-        return lon, lat, normalize_angle(theta - yaw)
+        return lon, lat, _map_to_compass(theta, yaw)
 
     def _node_position_to_wgs84(self, position):
         try:

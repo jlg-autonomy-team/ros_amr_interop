@@ -36,6 +36,7 @@ from paho.mqtt.reasoncodes import ReasonCode
 from unittest.mock import MagicMock
 import pytest
 import json
+import math
 
 from vda5050_connector_py.utils import get_vda5050_ts
 from vda5050_connector_py import mqtt_bridge as mqtt_bridge_module
@@ -836,7 +837,7 @@ def wgs84_message(topic, payload):
     return message
 
 
-def wgs84_order(lon=GEO_LON0 + 0.0001):
+def wgs84_order(lon=GEO_LON0 + 0.0001, theta=0.5):
     return {
         "headerId": 1,
         "timestamp": "2026-10-16T03:51:52.799Z",
@@ -850,7 +851,7 @@ def wgs84_order(lon=GEO_LON0 + 0.0001):
                 "nodeId": "n1",
                 "sequenceId": 0,
                 "released": True,
-                "nodePosition": {"x": lon, "y": GEO_LAT0, "theta": 0.5, "mapId": "WGS84"},
+                "nodePosition": {"x": lon, "y": GEO_LAT0, "theta": theta, "mapId": "WGS84"},
                 "actions": [],
             }
         ],
@@ -895,8 +896,43 @@ def test_wgs84_order_is_published_in_map_frame(make_wgs84_bridge, enable_validat
     position = bridge._order_pub.publish.call_args.kwargs["msg"].nodes[0].node_position
     assert position.x == pytest.approx(10.0)
     assert position.y == pytest.approx(0.0)
-    assert position.theta == pytest.approx(0.5)
+    assert position.theta == pytest.approx(math.pi / 2.0 - 0.5)
     bridge.call_dtc_force_latch.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "compass,map_theta",
+    [(0.0, math.pi / 2.0), (math.pi / 2.0, 0.0), (math.pi, -math.pi / 2.0)],
+    ids=["north", "east", "south"],
+)
+def test_wgs84_order_compass_heading_to_enu_aligned_map(make_wgs84_bridge, compass, map_theta):
+    bridge = make_wgs84_bridge()
+
+    bridge.on_message_mqtt(
+        bridge.mqtt_client, None, wgs84_message("order", wgs84_order(theta=compass))
+    )
+
+    position = bridge._order_pub.publish.call_args.kwargs["msg"].nodes[0].node_position
+    assert position.theta == pytest.approx(map_theta)
+
+
+@pytest.mark.parametrize(
+    "map_theta,compass",
+    [(math.pi / 2.0, 0.0), (0.0, math.pi / 2.0), (2.846, math.radians(286.936))],
+    ids=["north", "east", "west-north-west"],
+)
+def test_wgs84_state_reports_compass_heading(
+    make_wgs84_bridge, mock_mqtt_client, map_theta, compass
+):
+    bridge = make_wgs84_bridge()
+    state = OrderState()
+    state.agv_position.position_initialized = True
+    state.agv_position.theta = map_theta
+
+    bridge._publish_state(state)
+
+    theta = published_payload(mock_mqtt_client)["agvPosition"]["theta"]
+    assert theta == pytest.approx(compass, abs=1e-4)
 
 
 @pytest.mark.parametrize("enable_validation", [True, False], ids=["validation", "no-validation"])
@@ -1013,7 +1049,7 @@ def test_wgs84_state_is_published_in_wgs84(make_wgs84_bridge, mock_mqtt_client):
     payload = published_payload(mock_mqtt_client)
     assert payload["agvPosition"]["x"] == pytest.approx(GEO_LON0 + 0.0001)
     assert payload["agvPosition"]["y"] == pytest.approx(GEO_LAT0)
-    assert payload["agvPosition"]["theta"] == pytest.approx(0.5)
+    assert payload["agvPosition"]["theta"] == pytest.approx(math.pi / 2.0 - 0.5)
     assert payload["agvPosition"]["mapId"] == "WGS84"
     assert payload["nodeStates"][0]["nodePosition"]["x"] == GEO_LON0 + 0.0001
     assert payload["nodeStates"][0]["nodePosition"]["y"] == GEO_LAT0

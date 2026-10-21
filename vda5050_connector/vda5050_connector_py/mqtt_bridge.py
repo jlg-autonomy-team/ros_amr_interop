@@ -296,7 +296,7 @@ class MQTTBridge(Node):
         )
 
         # Coordinate system used in VDA5050 MQTT messages: "cartesian" (map frame, meters) or
-        # "wgs84" (x=longitude, y=latitude [deg], theta=ENU yaw [rad]).
+        # "wgs84" (x=longitude, y=latitude [deg], theta=compass heading [rad]).
         self.coordinate_system = read_str_parameter(
             self, "coordinate_system", COORDINATE_SYSTEM_CARTESIAN
         ).lower()

@@ -45,6 +45,7 @@ from vda5050_connector_py.geo_conversion import drop_unknown_positions
 from vda5050_connector_py.geo_conversion import GeoConversionError
 from vda5050_connector_py.geo_conversion import GeoCoordinateTranslator
 from vda5050_connector_py.geo_conversion import NavSatGeoConverter
+from vda5050_connector_py.geo_conversion import normalize_angle
 from vda5050_msgs.msg import ControlPoint
 from vda5050_msgs.msg import EdgeState
 from vda5050_msgs.msg import NodeState
@@ -62,6 +63,14 @@ CONVERGENCE_PER_DEG = 0.5
 
 def fake_enu_to_map_yaw(lon, lat):
     return -MAP_YAW - CONVERGENCE_PER_DEG * (lon - LON0)
+
+
+def compass_to_map(heading, lon):
+    return normalize_angle(math.pi / 2.0 - heading + fake_enu_to_map_yaw(lon, LAT0))
+
+
+def map_to_compass(theta, lon):
+    return (math.pi / 2.0 - theta + fake_enu_to_map_yaw(lon, LAT0)) % math.tau
 
 
 class FakeConverter:
@@ -146,14 +155,13 @@ def get_order():
 def test_order_to_map_converts_positions_and_headings():
     translator = GeoCoordinateTranslator(FakeConverter())
     original = get_order()
-    n1_yaw = fake_enu_to_map_yaw(LON0 + 0.0001, LAT0)
 
     order = translator.order_to_map(original)
 
     position = order["nodes"][0]["node_position"]
     assert position["x"] == pytest.approx(10.0 * math.cos(MAP_YAW))
     assert position["y"] == pytest.approx(-10.0 * math.sin(MAP_YAW))
-    assert position["theta"] == pytest.approx(n1_yaw)
+    assert position["theta"] == pytest.approx(compass_to_map(0.0, LON0 + 0.0001))
     assert position["allowed_deviation_x_y"] == 0.5
     assert "node_position" not in order["nodes"][1]
 
@@ -162,7 +170,7 @@ def test_order_to_map_converts_positions_and_headings():
     assert cp["y"] == pytest.approx(10.0 * math.cos(MAP_YAW))
     assert cp["weight"] == 1.0
     # GLOBAL edge orientation uses the yaw offset at its start node.
-    assert order["edges"][0]["orientation"] == pytest.approx(0.5 + n1_yaw)
+    assert order["edges"][0]["orientation"] == pytest.approx(compass_to_map(0.5, LON0 + 0.0001))
     assert order["edges"][0]["length"] == 12
 
     assert original == get_order()
@@ -749,7 +757,7 @@ def test_order_to_map_converts_embedded_init_position_actions():
         params = {p["key"]: p["value"] for p in action["action_parameters"]}
         assert params["x"] == pytest.approx(10.0 * math.cos(MAP_YAW))
         assert params["y"] == pytest.approx(-10.0 * math.sin(MAP_YAW))
-        assert params["theta"] == pytest.approx(1.0 + fake_enu_to_map_yaw(LON0 + 0.0001, LAT0))
+        assert params["theta"] == pytest.approx(compass_to_map(1.0, LON0 + 0.0001))
 
 
 def test_instant_actions_init_position_to_map():
@@ -782,7 +790,7 @@ def test_instant_actions_init_position_to_map():
     params = {p["key"]: p["value"] for p in converted["actions"][0]["action_parameters"]}
     assert params["x"] == pytest.approx(10.0 * math.cos(MAP_YAW))
     assert params["y"] == pytest.approx(-10.0 * math.sin(MAP_YAW))
-    assert params["theta"] == pytest.approx(1.0 + fake_enu_to_map_yaw(LON0 + 0.0001, LAT0))
+    assert params["theta"] == pytest.approx(compass_to_map(1.0, LON0 + 0.0001))
     assert params["mapId"] == "WGS84"
     assert converted["actions"][1] == instant_actions["actions"][1]
 
@@ -987,7 +995,7 @@ def test_state_to_wgs84_round_trip_restores_original_order_positions():
     assert wgs84_state.agv_position.x == pytest.approx(LON0 + 0.0001)
     assert wgs84_state.agv_position.y == pytest.approx(LAT0)
     assert wgs84_state.agv_position.theta == pytest.approx(
-        -MAP_YAW - fake_enu_to_map_yaw(LON0 + 0.0001, LAT0)
+        map_to_compass(-MAP_YAW, LON0 + 0.0001)
     )
     assert wgs84_state.agv_position.map_id == "WGS84"
 
@@ -1017,7 +1025,7 @@ def test_state_to_wgs84_unknown_node_is_converted():
     assert wgs84_state.node_states[0].node_position.x == pytest.approx(LON0 + 0.0001)
     assert wgs84_state.node_states[0].node_position.y == pytest.approx(LAT0)
     assert wgs84_state.node_states[0].node_position.theta == pytest.approx(
-        -fake_enu_to_map_yaw(LON0 + 0.0001, LAT0)
+        map_to_compass(0.0, LON0 + 0.0001)
     )
 
 
@@ -1043,10 +1051,11 @@ def test_visualization_to_wgs84():
     visualization.agv_position.position_initialized = True
     visualization.agv_position.x = 0.0
     visualization.agv_position.y = 0.0
-    visualization.agv_position.theta = math.pi - 0.05
+    visualization.agv_position.theta = math.pi / 2.0 - 0.05
 
     wgs84 = translator.visualization_to_wgs84(visualization)
 
     assert wgs84.agv_position.x == pytest.approx(LON0)
     assert wgs84.agv_position.y == pytest.approx(LAT0)
-    assert wgs84.agv_position.theta == pytest.approx(-math.pi + 0.05)
+    # Compass pi/2 - theta - MAP_YAW = -0.05 wraps into [0, 2*pi).
+    assert wgs84.agv_position.theta == pytest.approx(math.tau - 0.05)

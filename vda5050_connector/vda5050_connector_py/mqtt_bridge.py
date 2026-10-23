@@ -58,6 +58,17 @@ from vda5050_connector_py.utils import json_camel_to_snake_case
 from vda5050_connector_py.utils import read_str_parameter, read_int_parameter
 # JLG_CHANGES_START
 from vda5050_connector_py.utils import read_bool_parameter
+from vda5050_connector_py.utils import read_double_parameter
+from vda5050_connector_py.geo_conversion import COORDINATE_SYSTEM_CARTESIAN
+from vda5050_connector_py.geo_conversion import COORDINATE_SYSTEM_WGS84
+from vda5050_connector_py.geo_conversion import SUPPORTED_COORDINATE_SYSTEMS
+from vda5050_connector_py.geo_conversion import GeoConversionError
+from vda5050_connector_py.geo_conversion import NavSatGeoConverter
+from vda5050_connector_py.geo_conversion import GeoCoordinateTranslator
+from vda5050_connector_py.geo_conversion import drop_unknown_positions
+from vda5050_connector_py.geo_conversion import order_for_validation
+from vda5050_connector_py.utils import json_snake_to_camel_case
+from rosidl_runtime_py import message_to_ordereddict
 # JLG_CHANGES_END
 from vda5050_connector_py.utils import convert_ros_message_to_json
 from vda5050_connector_py.utils import get_vda5050_ts
@@ -284,9 +295,45 @@ class MQTTBridge(Node):
         self.broker_comm_loss_dtc = read_int_parameter(
             self, "broker_comm_loss_dtc", 2456
         )
+
+        # Coordinate system used in VDA5050 MQTT messages: "cartesian" (map frame, meters) or
+        # "wgs84" (x=longitude, y=latitude [deg], theta=compass heading [deg]).
+        self.coordinate_system = read_str_parameter(
+            self, "coordinate_system", COORDINATE_SYSTEM_CARTESIAN
+        ).lower()
+        if self.coordinate_system not in SUPPORTED_COORDINATE_SYSTEMS:
+            raise ValueError(
+                f"Invalid coordinate_system '{self.coordinate_system}'. "
+                f"Supported values are: {SUPPORTED_COORDINATE_SYSTEMS}"
+            )
+        self.geo_map_id = read_str_parameter(self, "geo_map_id", "")
+        self.geo_service_timeout = read_double_parameter(self, "geo_service_timeout", 1.0)
         # JLG_CHANGES_END
 
         self.configure()
+
+    # JLG_CHANGES_START
+    @property
+    def uses_geographic_coordinates(self) -> bool:
+        return self.coordinate_system == COORDINATE_SYSTEM_WGS84
+
+    def _order_to_map(self, order: dict) -> dict:
+        if self._geo_translator is None:
+            return order
+        return self._geo_translator.order_to_map(order)
+
+    def _instant_actions_to_map(self, instant_actions: dict) -> dict:
+        if self._geo_translator is None:
+            return instant_actions
+        return self._geo_translator.instant_actions_to_map(instant_actions)
+
+    def _log_geo_conversion_error(self, topic: str, ex: GeoConversionError):
+        # The message is valid; the robot just cannot place it in its map frame right now.
+        self.logger.error(
+            f"❌ Ignoring VDA5050 message on '{topic}': cannot convert WGS84 coordinates "
+            f"to the map frame: {ex}"
+        )
+    # JLG_CHANGES_END
 
     def configure(self):
         # Configure MQTT
@@ -365,6 +412,19 @@ class MQTTBridge(Node):
         self.dtc_force_latch_client = self.create_client(
             DTCUnlatch, "diagnostics/force_latch_dtc"
         )
+
+        # Must exist before MQTT messages can arrive.
+        self._geo_translator = None
+        if self.uses_geographic_coordinates:
+            self._geo_translator = GeoCoordinateTranslator(
+                converter=NavSatGeoConverter(node=self, timeout_sec=self.geo_service_timeout),
+                map_id=self.geo_map_id,
+                logger=self.logger,
+                conversion_budget_sec=self.geo_service_timeout,
+            )
+            self.logger.info(
+                "VDA5050 MQTT coordinates are WGS84 (x=longitude, y=latitude)"
+            )
         # JLG_CHANGES_END
 
         # Connect to MQTT broker
@@ -449,9 +509,10 @@ class MQTTBridge(Node):
 
             try:
                 if msg.topic.endswith("order"):
-                    order_validation = validate_vda5050_payload(
-                        "order", json.loads(msg.payload)
-                    )
+                    order_payload = json.loads(msg.payload)
+                    if self.uses_geographic_coordinates:
+                        order_payload = order_for_validation(order_payload)
+                    order_validation = validate_vda5050_payload("order", order_payload)
                     if order_validation:
                         self.logger.warn(f"❌ Invalid VDA5050 order message")
                         for loc, e in order_validation:
@@ -459,7 +520,9 @@ class MQTTBridge(Node):
                         self.call_dtc_force_latch(self.invalid_order_dtc)
                         return
                     self.logger.info("✅ Valid VDA5050 order message")
-                    vda_order_msg = VDAOrder(**generate_vda_order_msg(msg_json))
+                    vda_order_msg = VDAOrder(
+                        **generate_vda_order_msg(self._order_to_map(msg_json))
+                    )
                     self._order_pub.publish(msg=vda_order_msg)
                 if msg.topic.endswith("instantActions"):
                     instant_actions_validation = validate_vda5050_payload(
@@ -473,9 +536,14 @@ class MQTTBridge(Node):
                         return
                     self.logger.info("✅ Valid VDA5050 instantActions message")
                     vda_instant_actions_message = VDAInstantActions(
-                        **generate_vda_instant_action_msg(msg_json)
+                        **generate_vda_instant_action_msg(
+                            self._instant_actions_to_map(msg_json)
+                        )
                     )
                     self._instant_actions_pub.publish(msg=vda_instant_actions_message)
+            except GeoConversionError as ex:
+                self._log_geo_conversion_error(msg.topic, ex)
+                return
             except Exception as ex:
                 self.logger.warn(
                     f"Ignoring malformed VDA5050 message: {type(ex).__name__}: {ex}."
@@ -486,14 +554,21 @@ class MQTTBridge(Node):
         else:
             try:
                 if msg.topic.endswith("order"):
-                    vda_order_msg = VDAOrder(**generate_vda_order_msg(msg_json))
+                    vda_order_msg = VDAOrder(
+                        **generate_vda_order_msg(self._order_to_map(msg_json))
+                    )
                     self._order_pub.publish(msg=vda_order_msg)
                 if msg.topic.endswith("instantActions"):
                     vda_instant_actions_message = VDAInstantActions(
-                        **generate_vda_instant_action_msg(msg_json)
+                        **generate_vda_instant_action_msg(
+                            self._instant_actions_to_map(msg_json)
+                        )
                     )
                     self._instant_actions_pub.publish(msg=vda_instant_actions_message)
             # JLG_CHANGES_START
+            except GeoConversionError as ex:
+                self._log_geo_conversion_error(msg.topic, ex)
+                return
             except Exception as ex:
                 self.logger.warn(
                     f"Ignoring malformed VDA5050 message: {type(ex).__name__}: {ex}."
@@ -646,6 +721,11 @@ class MQTTBridge(Node):
 
         """
         json_msg = convert_ros_message_to_json(msg)
+        # JLG_CHANGES_START
+        self._publish_json_to_topic(json_msg, topic)
+
+    def _publish_json_to_topic(self, json_msg: str, topic: str):
+        # JLG_CHANGES_END
         self.logger.debug(f"Publishing MQTT message to topic {topic}: {json_msg}")
         # JLG_CHANGES_START
         result = self.mqtt_client.publish(topic, json_msg)
@@ -668,6 +748,10 @@ class MQTTBridge(Node):
             msg (VDAOrderState): VDA5050 ROS2 OrderState message.
 
         """
+        # JLG_CHANGES_START
+        if self._geo_translator is not None:
+            msg = self._geo_translator.state_to_wgs84(msg)
+        # JLG_CHANGES_END
         topic = get_vda5050_mqtt_topic(
             manufacturer=self._manufacturer_name,
             serial_number=self._serial_number,
@@ -675,6 +759,14 @@ class MQTTBridge(Node):
             major_version=self.vda5050_version_alias,
             interface_name=self._interface_name
         )
+        # JLG_CHANGES_START
+        if self._geo_translator is not None:
+            state = drop_unknown_positions(message_to_ordereddict(msg))
+            self._publish_json_to_topic(
+                json.dumps(json_snake_to_camel_case(json.dumps(state))), topic
+            )
+            return
+        # JLG_CHANGES_END
         self._publish_to_topic(msg, topic)
 
     def _publish_connection(self, msg: VDAConnection):
@@ -710,6 +802,10 @@ class MQTTBridge(Node):
             msg (VDAVisualization): VDA5050 ROS2 Visualization message.
 
         """
+        # JLG_CHANGES_START
+        if self._geo_translator is not None:
+            msg = self._geo_translator.visualization_to_wgs84(msg)
+        # JLG_CHANGES_END
         topic = get_vda5050_mqtt_topic(
             manufacturer=self._manufacturer_name,
             serial_number=self._serial_number,
